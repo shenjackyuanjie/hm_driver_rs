@@ -9,10 +9,10 @@ license = "MIT AND LicenseRef-HarmonyOS-UITest-Agent-Unknown"
 [features]
 default = ["blocking", "embedded-agents"]
 blocking = []
-embedded-agents = []
+embedded-agents = ["dep:directories"]
 
 [dependencies]
-directories = "6"
+directories = { version = "6", optional = true }
 regex = "1"
 secrecy = "0.10"
 serde = { version = "1", features = ["derive"] }

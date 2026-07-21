@@ -1,5 +1,6 @@
 use crate::catalog::AgentCatalog;
 use crate::{DriverError, Result};
+#[cfg(feature = "embedded-agents")]
 use directories::ProjectDirs;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -134,9 +135,9 @@ async fn materialize_embedded(profile: &AgentProfile) -> Result<PathBuf> {
     #[cfg(not(feature = "embedded-agents"))]
     {
         let _ = profile;
-        return Err(DriverError::Unsupported(
+        Err(DriverError::Unsupported(
             "编译时未启用 embedded-agents feature".into(),
-        ));
+        ))
     }
     #[cfg(feature = "embedded-agents")]
     {

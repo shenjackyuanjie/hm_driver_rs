@@ -137,14 +137,11 @@ impl HdcRunner {
             .map_err(DriverError::HdcSpawn)?;
         let stdout = self.redact(String::from_utf8_lossy(&result.stdout).into_owned());
         let stderr = self.redact(String::from_utf8_lossy(&result.stderr).into_owned());
-        let failed_marker = stdout.to_ascii_lowercase().contains("error:")
-            || stdout.to_ascii_lowercase().contains("[fail]")
-            || stderr.to_ascii_lowercase().contains("error:")
-            || stderr.to_ascii_lowercase().contains("[fail]");
+        let failed_marker = contains_failure_marker(&stdout) || contains_failure_marker(&stderr);
         if !result.status.success() || failed_marker {
             return Err(DriverError::HdcCommand {
                 code: result.status.code(),
-                message: "HDC 输出已隐藏，以避免泄露设备标识".into(),
+                message: command_failure_message(&stdout, &stderr),
             });
         }
         Ok(CommandOutput {
@@ -159,5 +156,58 @@ impl HdcRunner {
             Some(serial) => value.replace(serial.expose_secret(), "<redacted>"),
             None => value,
         }
+    }
+}
+
+const MAX_ERROR_OUTPUT_CHARS: usize = 4_096;
+
+fn contains_failure_marker(value: &str) -> bool {
+    value.lines().any(|line| {
+        let line = line.trim_start().to_ascii_lowercase();
+        line.starts_with("error:") || line.starts_with("[fail]")
+    })
+}
+
+fn command_failure_message(stdout: &str, stderr: &str) -> String {
+    let mut sections = Vec::new();
+    if !stderr.trim().is_empty() {
+        sections.push(format!("stderr: {}", stderr.trim()));
+    }
+    if !stdout.trim().is_empty() {
+        sections.push(format!("stdout: {}", stdout.trim()));
+    }
+    if sections.is_empty() {
+        return "HDC 未返回错误文本".into();
+    }
+    let message = sections.join("; ");
+    if message.chars().count() <= MAX_ERROR_OUTPUT_CHARS {
+        message
+    } else {
+        let mut truncated: String = message.chars().take(MAX_ERROR_OUTPUT_CHARS).collect();
+        truncated.push_str("...[truncated]");
+        truncated
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failure_markers_only_match_line_prefixes() {
+        assert!(contains_failure_marker("Error: device offline"));
+        assert!(contains_failure_marker("notice\n  [Fail] command"));
+        assert!(!contains_failure_marker("payload contains error: as data"));
+    }
+
+    #[test]
+    fn failure_output_is_preserved_and_bounded() {
+        assert_eq!(
+            command_failure_message("bad stdout", "bad stderr"),
+            "stderr: bad stderr; stdout: bad stdout"
+        );
+        let message = command_failure_message(&"x".repeat(5_000), "");
+        assert!(message.ends_with("...[truncated]"));
+        assert!(message.chars().count() < 4_200);
     }
 }
