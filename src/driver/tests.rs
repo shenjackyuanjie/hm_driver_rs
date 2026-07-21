@@ -1,5 +1,5 @@
 use super::app::{parse_ability_infos, select_main_ability, shell_quote};
-use super::device::{parse_screen_state, parse_wlan_ip};
+use super::device::{parse_screen_state, parse_wlan_ip, should_toggle_for_screen_off};
 use super::session::{extract_four_part_version, singleness_pids};
 use super::*;
 use crate::rpc::ApiDialect;
@@ -30,7 +30,8 @@ fn extracts_one_strict_four_part_version() {
 
 #[test]
 fn only_matches_exact_singleness_process() {
-    let output = "shell 100 1 0 uitest start-daemon singleness\nshell 101 1 0 uitest start-daemon demo\n";
+    let output =
+        "shell 100 1 0 uitest start-daemon singleness\nshell 101 1 0 uitest start-daemon demo\n";
     assert_eq!(singleness_pids(output).collect::<Vec<_>>(), vec!["100"]);
 }
 
@@ -100,6 +101,74 @@ fn parses_screen_state_and_non_loopback_ip() {
         .unwrap(),
         Some("192.168.1.20".parse().unwrap())
     );
+}
+
+#[test]
+fn screen_off_only_toggles_an_awake_display() {
+    assert!(should_toggle_for_screen_off(&ScreenState::Awake).unwrap());
+    assert!(!should_toggle_for_screen_off(&ScreenState::Sleep).unwrap());
+    assert!(!should_toggle_for_screen_off(&ScreenState::Inactive).unwrap());
+    assert!(should_toggle_for_screen_off(&ScreenState::Unknown("DOZE".into())).is_err());
+}
+
+#[tokio::test]
+async fn generic_wait_honors_condition_and_deadline() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let _connection = listener.accept().await.unwrap();
+        std::future::pending::<()>().await;
+    });
+    let rpc = RpcClient::connect(port, Duration::from_secs(1), Duration::from_secs(1), 1024)
+        .await
+        .unwrap();
+    let driver = HmDriver::with_test_rpc(rpc, ApiDialect::Modern);
+    let attempts = std::sync::atomic::AtomicUsize::new(0);
+    assert!(
+        driver
+            .wait_until_with_interval(Duration::from_secs(1), Duration::from_millis(1), || async {
+                Ok(attempts.fetch_add(1, Ordering::Relaxed) >= 2)
+            },)
+            .await
+            .unwrap()
+    );
+    let started = tokio::time::Instant::now();
+    assert!(
+        !driver
+            .wait_until_with_interval(
+                Duration::from_millis(20),
+                Duration::from_millis(2),
+                || async { Ok(false) },
+            )
+            .await
+            .unwrap()
+    );
+    assert!(started.elapsed() < Duration::from_millis(150));
+}
+
+#[tokio::test]
+async fn selector_wait_cancels_a_slow_rpc_at_its_total_deadline() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let (reader, _writer) = stream.into_split();
+        let mut lines = BufReader::new(reader).lines();
+        let _ = lines.next_line().await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    });
+    let rpc = RpcClient::connect(port, Duration::from_secs(1), Duration::from_secs(1), 1024)
+        .await
+        .unwrap();
+    let driver = HmDriver::with_test_rpc(rpc, ApiDialect::Modern);
+    let started = tokio::time::Instant::now();
+    assert!(matches!(
+        driver
+            .wait_for(&crate::Selector::new(), Duration::from_millis(20))
+            .await,
+        Err(DriverError::ElementNotFound)
+    ));
+    assert!(started.elapsed() < Duration::from_millis(150));
 }
 
 #[test]

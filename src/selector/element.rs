@@ -6,6 +6,7 @@ use crate::{Bounds, DriverError, Result};
 use serde_json::{Value, json};
 use std::sync::Mutex;
 use std::time::Duration;
+use tokio::time::{Instant, timeout_at};
 
 struct ElementState {
     remote_reference: Option<String>,
@@ -265,15 +266,50 @@ impl Element {
     }
 
     pub async fn wait_until_gone(&self, timeout: Duration) -> Result<bool> {
-        let deadline = tokio::time::Instant::now() + timeout;
+        let deadline = Instant::now() + timeout;
         loop {
-            if self.driver.find(&self.selector).await?.is_none() {
-                return Ok(true);
-            }
-            if tokio::time::Instant::now() >= deadline {
+            if Instant::now() >= deadline {
                 return Ok(false);
             }
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            match timeout_at(deadline, self.driver.find(&self.selector)).await {
+                Ok(Ok(None)) => return Ok(true),
+                Ok(Ok(Some(_))) => {
+                    tokio::time::sleep_until(std::cmp::min(
+                        Instant::now() + Duration::from_millis(100),
+                        deadline,
+                    ))
+                    .await;
+                }
+                Ok(Err(error)) => return Err(error),
+                Err(_) => return Ok(false),
+            }
+        }
+    }
+
+    /// 等待控件属性变为指定值，超时返回 `false`。
+    pub async fn wait_for_attribute(
+        &self,
+        name: &str,
+        expected: &Value,
+        timeout: Duration,
+    ) -> Result<bool> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if Instant::now() >= deadline {
+                return Ok(false);
+            }
+            match timeout_at(deadline, self.attribute(name)).await {
+                Ok(Ok(actual)) if actual == *expected => return Ok(true),
+                Ok(Ok(_)) => {
+                    tokio::time::sleep_until(std::cmp::min(
+                        Instant::now() + Duration::from_millis(100),
+                        deadline,
+                    ))
+                    .await;
+                }
+                Ok(Err(error)) => return Err(error),
+                Err(_) => return Ok(false),
+            }
         }
     }
 }

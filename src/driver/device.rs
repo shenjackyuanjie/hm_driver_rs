@@ -84,6 +84,15 @@ impl HmDriver {
     }
 
     pub async fn screen_off(&self) -> Result<()> {
+        if should_toggle_for_screen_off(&self.screen_state().await?)? {
+            self.toggle_screen_power().await
+        } else {
+            Ok(())
+        }
+    }
+
+    /// 无条件发送一次电源键，用于显式切换屏幕电源状态。
+    pub async fn toggle_screen_power(&self) -> Result<()> {
         self.press_key_code(KeyCode::Power).await
     }
 
@@ -110,6 +119,16 @@ impl HmDriver {
             6000,
         )
         .await
+    }
+}
+
+pub(super) fn should_toggle_for_screen_off(state: &ScreenState) -> Result<bool> {
+    match state {
+        ScreenState::Awake => Ok(true),
+        ScreenState::Inactive | ScreenState::Sleep => Ok(false),
+        ScreenState::Unknown(value) => Err(DriverError::Protocol(format!(
+            "无法根据未知电源状态 {value} 安全关闭屏幕"
+        ))),
     }
 }
 
