@@ -1,6 +1,6 @@
 //! UI 树抓取、选择器查找与 XPath 查询。
 
-use super::{HmDriver, next_operation_id};
+use super::{HmDriver, RemoteFileGuard, next_operation_id};
 use crate::selector::{Element, Selector};
 use crate::ui::UiNode;
 use crate::xpath::XPathElement;
@@ -18,6 +18,7 @@ impl HmDriver {
         let directory = tempdir()?;
         let local = directory.path().join("layout.json");
         let remote = format!("/data/local/tmp/hm_driver_{}.json", next_operation_id());
+        let remote_guard = RemoteFileGuard::new(self.inner.hdc.clone(), remote.clone());
         self.inner
             .hdc
             .shell(format!("uitest dumpLayout -p {remote}"))
@@ -28,7 +29,7 @@ impl HmDriver {
             UiNode::from_layout_json(serde_json::from_slice(&bytes)?)
         }
         .await;
-        let _ = self.inner.hdc.shell(format!("rm -f {remote}")).await;
+        remote_guard.cleanup().await;
         result
     }
 

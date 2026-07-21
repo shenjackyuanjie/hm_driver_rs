@@ -24,6 +24,7 @@ use crate::rpc::{ApiDialect, RpcClient};
 use crate::types::DeviceSelector;
 use crate::{DriverError, Result};
 use serde_json::{Value, json};
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -180,6 +181,101 @@ struct SessionState {
 struct QueuedReference {
     value: String,
     generation: u64,
+}
+
+pub(super) struct RemoteFileGuard {
+    hdc: HdcRunner,
+    path: Option<String>,
+}
+
+impl RemoteFileGuard {
+    pub(super) fn new(hdc: HdcRunner, path: String) -> Self {
+        Self {
+            hdc,
+            path: Some(path),
+        }
+    }
+
+    pub(super) fn disarm(&mut self) {
+        self.path = None;
+    }
+
+    pub(super) async fn cleanup(mut self) {
+        if let Some(path) = self.path.as_deref() {
+            let _ = self.hdc.shell(format!("rm -f {path}")).await;
+        }
+        self.disarm();
+    }
+}
+
+impl Drop for RemoteFileGuard {
+    fn drop(&mut self) {
+        let Some(path) = self.path.take() else {
+            return;
+        };
+        let hdc = self.hdc.clone();
+        spawn_cleanup(async move {
+            let _ = hdc.shell(format!("rm -f {path}")).await;
+        });
+    }
+}
+
+pub(super) fn spawn_cleanup<F>(future: F)
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        handle.spawn(future);
+    } else {
+        let _ = std::thread::Builder::new()
+            .name("hm-driver-cleanup".into())
+            .spawn(move || {
+                if let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    runtime.block_on(future);
+                }
+            });
+    }
+}
+
+impl Drop for HmDriverInner {
+    fn drop(&mut self) {
+        let Ok(mut state) = self.state.try_lock() else {
+            tracing::warn!(target: "hm_driver_rs::cleanup", "Driver 释放时会话仍被占用，无法执行兜底清理");
+            return;
+        };
+        if state.closed {
+            return;
+        }
+        let rpc = state.rpc.take();
+        let forwards = std::mem::take(&mut state.owned_forwards);
+        let references: Vec<_> = self
+            .cleaner
+            .get_mut()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .drain(..)
+            .map(|item| item.value)
+            .collect();
+        let hdc = self.hdc.clone();
+        let kill_daemon = self.config.kill_daemon_on_close;
+        spawn_cleanup(async move {
+            if let Some(rpc) = rpc {
+                if !references.is_empty() && rpc.is_valid() {
+                    let _ = rpc
+                        .call("BackendObjectsCleaner", None, json!(references))
+                        .await;
+                }
+                rpc.invalidate();
+            }
+            let mut forwards = forwards;
+            let _ = session::cleanup_owned_forwards(&hdc, &mut forwards).await;
+            if kill_daemon {
+                let _ = session::stop_singleness_daemon(&hdc).await;
+            }
+        });
+    }
 }
 
 impl HmDriver {
@@ -367,7 +463,10 @@ impl HmDriver {
         .await
     }
 
-    async fn absolute_position(&self, position: crate::types::Position) -> Result<crate::types::Point> {
+    async fn absolute_position(
+        &self,
+        position: crate::types::Position,
+    ) -> Result<crate::types::Point> {
         position.resolve(self.display_size().await?)
     }
 

@@ -1,6 +1,6 @@
 //! 文件推拉、原始 shell 执行与截图。
 
-use super::{HmDriver, next_operation_id};
+use super::{HmDriver, RemoteFileGuard, next_operation_id};
 use crate::hdc::CommandOutput;
 use crate::types::{ForwardEntry, ScreenshotMethod};
 use crate::{DriverError, Result};
@@ -58,51 +58,25 @@ impl HmDriver {
                 let first = self
                     .capture_screenshot(&snapshot_remote, &local, ScreenshotMethod::SnapshotDisplay)
                     .await;
-                let _ = self
-                    .inner
-                    .hdc
-                    .shell(format!("rm -f {snapshot_remote}"))
-                    .await;
                 match first {
                     Ok(bytes) => Ok(bytes),
                     Err(_) => {
-                        let result = self
-                            .capture_screenshot(
-                                &screen_cap_remote,
-                                &local,
-                                ScreenshotMethod::ScreenCap,
-                            )
-                            .await;
-                        let _ = self
-                            .inner
-                            .hdc
-                            .shell(format!("rm -f {screen_cap_remote}"))
-                            .await;
-                        result
+                        self.capture_screenshot(
+                            &screen_cap_remote,
+                            &local,
+                            ScreenshotMethod::ScreenCap,
+                        )
+                        .await
                     }
                 }
             }
             ScreenshotMethod::SnapshotDisplay => {
-                let result = self
-                    .capture_screenshot(&snapshot_remote, &local, ScreenshotMethod::SnapshotDisplay)
-                    .await;
-                let _ = self
-                    .inner
-                    .hdc
-                    .shell(format!("rm -f {snapshot_remote}"))
-                    .await;
-                result
+                self.capture_screenshot(&snapshot_remote, &local, ScreenshotMethod::SnapshotDisplay)
+                    .await
             }
             ScreenshotMethod::ScreenCap => {
-                let result = self
-                    .capture_screenshot(&screen_cap_remote, &local, ScreenshotMethod::ScreenCap)
-                    .await;
-                let _ = self
-                    .inner
-                    .hdc
-                    .shell(format!("rm -f {screen_cap_remote}"))
-                    .await;
-                result
+                self.capture_screenshot(&screen_cap_remote, &local, ScreenshotMethod::ScreenCap)
+                    .await
             }
         }
     }
@@ -127,6 +101,7 @@ impl HmDriver {
         local: &Path,
         method: ScreenshotMethod,
     ) -> Result<Vec<u8>> {
+        let remote_guard = RemoteFileGuard::new(self.inner.hdc.clone(), remote.to_owned());
         let command = match method {
             ScreenshotMethod::SnapshotDisplay => format!("snapshot_display -f {remote}"),
             ScreenshotMethod::ScreenCap => format!("uitest screenCap -p {remote}"),
@@ -136,8 +111,13 @@ impl HmDriver {
                 ));
             }
         };
-        self.inner.hdc.shell(command).await?;
-        self.inner.hdc.receive_file(remote, local).await?;
-        tokio::fs::read(local).await.map_err(DriverError::Io)
+        let result = async {
+            self.inner.hdc.shell(command).await?;
+            self.inner.hdc.receive_file(remote, local).await?;
+            tokio::fs::read(local).await.map_err(DriverError::Io)
+        }
+        .await;
+        remote_guard.cleanup().await;
+        result
     }
 }

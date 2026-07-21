@@ -1,6 +1,6 @@
 //! Agent 探测、部署以及 RPC 会话建立/恢复逻辑。
 
-use super::{DriverConfig, next_operation_id};
+use super::{DriverConfig, RemoteFileGuard, next_operation_id, spawn_cleanup};
 use crate::agent::{AgentProfile, HarmonyTransport};
 use crate::hdc::HdcRunner;
 use crate::rpc::{ApiDialect, RpcClient};
@@ -100,6 +100,7 @@ pub(super) async fn ensure_agent(
     } else {
         stop_singleness_daemon(hdc).await?;
         let temporary = format!("/data/local/tmp/.hm_driver_{}.so", next_operation_id());
+        let mut temporary_guard = RemoteFileGuard::new(hdc.clone(), temporary.clone());
         hdc.send_file(local, &temporary).await?;
         let pushed_hash = hdc
             .shell(format!("sha256sum {temporary}"))
@@ -110,7 +111,6 @@ pub(super) async fn ensure_agent(
             .unwrap_or_default()
             .to_ascii_lowercase();
         if pushed_hash != profile.sha256 {
-            let _ = hdc.shell(format!("rm -f {temporary}")).await;
             return Err(DriverError::AgentVerification(
                 "设备端临时 Agent SHA-256 不匹配".into(),
             ));
@@ -124,6 +124,7 @@ pub(super) async fn ensure_agent(
             profile.sha256
         ))
         .await?;
+        temporary_guard.disarm();
     }
     hdc.shell_timeout("uitest start-daemon singleness", hdc.agent_timeout())
         .await?;
@@ -200,7 +201,7 @@ pub(super) async fn establish_session(
 ) -> Result<EstablishedSession> {
     let remote = transport_endpoint(transport);
     let mut last_error = None;
-    let mut owned_forwards = Vec::new();
+    let mut owned_forwards = ForwardCleanupGuard::new(hdc.clone(), Vec::new());
     for _ in 0..3 {
         let listener = TcpListener::bind(("127.0.0.1", 0))
             .await
@@ -210,25 +211,29 @@ pub(super) async fn establish_session(
             .map_err(DriverError::RpcConnect)?
             .port();
         drop(listener);
-        if let Err(error) = hdc.forward(port, &remote).await {
-            last_error = Some(error);
-            continue;
-        }
-        owned_forwards.push(OwnedForward {
+        owned_forwards.forwards.push(OwnedForward {
             local_port: port,
             remote: remote.clone(),
         });
+        if let Err(error) = hdc.forward(port, &remote).await {
+            let cleanup_issues = cleanup_guard_forwards(&mut owned_forwards).await;
+            if !cleanup_issues.is_empty() {
+                return Err(forward_cleanup_after_operation(error, cleanup_issues));
+            }
+            last_error = Some(error);
+            continue;
+        }
         match connect_and_create(port, config, api_level).await {
             Ok((rpc, dialect, driver_reference)) => {
                 return Ok(EstablishedSession {
                     rpc,
                     dialect,
                     driver_reference,
-                    owned_forwards,
+                    owned_forwards: owned_forwards.take(),
                 });
             }
             Err(error) => {
-                let cleanup_issues = cleanup_owned_forwards(hdc, &mut owned_forwards).await;
+                let cleanup_issues = cleanup_guard_forwards(&mut owned_forwards).await;
                 if !cleanup_issues.is_empty() {
                     return Err(forward_cleanup_after_operation(error, cleanup_issues));
                 }
@@ -243,22 +248,64 @@ pub(super) async fn cleanup_owned_forwards(
     hdc: &HdcRunner,
     owned_forwards: &mut Vec<OwnedForward>,
 ) -> Vec<ForwardCleanupIssue> {
-    let mut retained = Vec::new();
+    let mut guard = ForwardCleanupGuard::new(hdc.clone(), std::mem::take(owned_forwards));
+    let issues = cleanup_guard_forwards(&mut guard).await;
+    *owned_forwards = guard.take();
+    issues
+}
+
+async fn cleanup_guard_forwards(guard: &mut ForwardCleanupGuard) -> Vec<ForwardCleanupIssue> {
     let mut issues = Vec::new();
-    for forward in std::mem::take(owned_forwards) {
-        match hdc
+    let mut index = 0;
+    while index < guard.forwards.len() {
+        let forward = guard.forwards[index].clone();
+        match guard
+            .hdc
             .remove_forward(forward.local_port, &forward.remote)
             .await
         {
-            Ok(()) => {}
+            Ok(()) => {
+                guard.forwards.swap_remove(index);
+            }
             Err(error) => {
-                retained.push(forward.clone());
                 issues.push(ForwardCleanupIssue { forward, error });
+                index += 1;
             }
         }
     }
-    *owned_forwards = retained;
     issues
+}
+
+struct ForwardCleanupGuard {
+    hdc: HdcRunner,
+    forwards: Vec<OwnedForward>,
+}
+
+impl ForwardCleanupGuard {
+    fn new(hdc: HdcRunner, forwards: Vec<OwnedForward>) -> Self {
+        Self { hdc, forwards }
+    }
+
+    fn take(&mut self) -> Vec<OwnedForward> {
+        std::mem::take(&mut self.forwards)
+    }
+}
+
+impl Drop for ForwardCleanupGuard {
+    fn drop(&mut self) {
+        let forwards = self.take();
+        if forwards.is_empty() {
+            return;
+        }
+        let hdc = self.hdc.clone();
+        spawn_cleanup(async move {
+            for forward in forwards {
+                let _ = hdc
+                    .remove_forward(forward.local_port, &forward.remote)
+                    .await;
+            }
+        });
+    }
 }
 
 pub(super) fn forward_cleanup_error(mut issues: Vec<ForwardCleanupIssue>) -> DriverError {
