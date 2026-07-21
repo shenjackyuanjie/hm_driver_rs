@@ -1,0 +1,170 @@
+//! 点击、滑动、按键与手势注入。
+
+use super::HmDriver;
+use crate::gesture::Gesture;
+use crate::keycode::KeyCode;
+use crate::types::{Point, Position, SwipeArea, SwipeDirection};
+use crate::{DriverError, Result};
+use serde_json::json;
+
+impl HmDriver {
+    pub async fn press_key(&self, key_code: u32) -> Result<()> {
+        if key_code > 3200 {
+            return Err(DriverError::InvalidCoordinate("按键码超过 3200".into()));
+        }
+        self.send_key_code(i32::try_from(key_code).expect("按键码已经限制为 3200 以下"))
+            .await
+    }
+
+    async fn send_key_code(&self, key_code: i32) -> Result<()> {
+        if !(-1..=3200).contains(&key_code) {
+            return Err(DriverError::InvalidCoordinate(
+                "按键码必须位于 -1 到 3200".into(),
+            ));
+        }
+        self.inner
+            .hdc
+            .shell(format!("uitest uiInput keyEvent {key_code}"))
+            .await
+            .map(|_| ())
+    }
+
+    pub async fn press_key_code(&self, key_code: KeyCode) -> Result<()> {
+        self.send_key_code(key_code.value()).await
+    }
+
+    pub async fn go_back(&self) -> Result<()> {
+        self.press_key_code(KeyCode::Back).await
+    }
+
+    pub async fn go_home(&self) -> Result<()> {
+        self.press_key_code(KeyCode::Home).await
+    }
+
+    pub async fn click(&self, point: Point) -> Result<()> {
+        self.coordinate_call("click", json!([point.x, point.y]))
+            .await
+    }
+
+    pub async fn click_position(&self, position: Position) -> Result<()> {
+        self.click(self.absolute_position(position).await?).await
+    }
+
+    pub async fn double_click(&self, point: Point) -> Result<()> {
+        self.coordinate_call("doubleClick", json!([point.x, point.y]))
+            .await
+    }
+
+    pub async fn double_click_position(&self, position: Position) -> Result<()> {
+        self.double_click(self.absolute_position(position).await?)
+            .await
+    }
+
+    pub async fn long_click(&self, point: Point) -> Result<()> {
+        self.coordinate_call("longClick", json!([point.x, point.y]))
+            .await
+    }
+
+    pub async fn long_click_position(&self, position: Position) -> Result<()> {
+        self.long_click(self.absolute_position(position).await?)
+            .await
+    }
+
+    pub async fn swipe(&self, from: Point, to: Point, speed: u32) -> Result<()> {
+        if !(200..=40_000).contains(&speed) {
+            return Err(DriverError::InvalidCoordinate(
+                "滑动速度必须位于 200 到 40000".into(),
+            ));
+        }
+        self.coordinate_call("swipe", json!([from.x, from.y, to.x, to.y, speed]))
+            .await
+    }
+
+    pub async fn swipe_positions(&self, from: Position, to: Position, speed: u32) -> Result<()> {
+        let size = self.display_size().await?;
+        self.swipe(from.resolve(size)?, to.resolve(size)?, speed)
+            .await
+    }
+
+    pub async fn swipe_direction(
+        &self,
+        direction: SwipeDirection,
+        area: SwipeArea,
+        scale: f64,
+        speed: u32,
+    ) -> Result<()> {
+        if !scale.is_finite() || !(0.0..=1.0).contains(&scale) || scale == 0.0 {
+            return Err(DriverError::InvalidCoordinate(
+                "方向滑动比例必须位于 0 到 1 之间".into(),
+            ));
+        }
+        let bounds = area.resolve(self.display_size().await?)?;
+        let center = bounds.center();
+        let horizontal = (f64::from(bounds.width()) * scale / 2.0).round() as i32;
+        let vertical = (f64::from(bounds.height()) * scale / 2.0).round() as i32;
+        let (from, to) = match direction {
+            SwipeDirection::Up => (
+                Point::new(center.x, center.y + vertical),
+                Point::new(center.x, center.y - vertical),
+            ),
+            SwipeDirection::Down => (
+                Point::new(center.x, center.y - vertical),
+                Point::new(center.x, center.y + vertical),
+            ),
+            SwipeDirection::Left => (
+                Point::new(center.x + horizontal, center.y),
+                Point::new(center.x - horizontal, center.y),
+            ),
+            SwipeDirection::Right => (
+                Point::new(center.x - horizontal, center.y),
+                Point::new(center.x + horizontal, center.y),
+            ),
+        };
+        self.swipe(from, to, speed).await
+    }
+
+    pub async fn perform_gesture(&self, gesture: &Gesture) -> Result<()> {
+        let matrix = gesture.compile(self.display_size().await?)?;
+        let total_points = matrix.first().map(Vec::len).unwrap_or_default();
+        let reference = self
+            .call_api_raw(
+                "PointerMatrix.create",
+                None,
+                json!([matrix.len(), total_points]),
+            )
+            .await?
+            .as_str()
+            .ok_or_else(|| DriverError::Protocol("PointerMatrix.create 未返回远端引用".into()))?
+            .to_owned();
+        let result = async {
+            for (finger_index, points) in matrix.iter().enumerate() {
+                for (point_index, point) in points.iter().enumerate() {
+                    self.call_api_raw(
+                        "PointerMatrix.setPoint",
+                        Some(&reference),
+                        json!([
+                            finger_index,
+                            point_index,
+                            {"x": point.encoded_x()?, "y": point.point.y}
+                        ]),
+                    )
+                    .await?;
+                }
+            }
+            self.driver_call(
+                "injectMultiPointerAction",
+                json!([reference, gesture.injection_speed_value()]),
+            )
+            .await
+            .map(|_| ())
+        }
+        .await;
+        self.queue_remote_reference(reference, self.generation());
+        result
+    }
+
+    pub async fn input_text(&self, text: &str) -> Result<()> {
+        self.coordinate_call("inputText", json!([{"x": 1, "y": 1}, text]))
+            .await
+    }
+}
