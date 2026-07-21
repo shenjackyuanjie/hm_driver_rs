@@ -383,6 +383,11 @@ impl HmDriver {
     }
 
     #[cfg(test)]
+    pub(crate) fn queued_reference_count(&self) -> usize {
+        self.inner.cleaner.lock().expect("清理队列锁中毒").len()
+    }
+
+    #[cfg(test)]
     pub(crate) fn with_test_rpc(rpc: RpcClient, dialect: ApiDialect) -> Self {
         let hdc = HdcRunner::new(
             HdcConfig::default()

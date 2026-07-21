@@ -80,10 +80,15 @@ impl Element {
             }
         }
         let references = self.driver.find_remote_references(&self.selector).await?;
-        let reference = references
-            .get(self.index)
-            .cloned()
-            .ok_or(DriverError::ElementNotFound)?;
+        let mut reference = None;
+        for (index, candidate) in references.into_iter().enumerate() {
+            if index == self.index {
+                reference = Some(candidate);
+            } else {
+                self.driver.queue_remote_reference(candidate, generation);
+            }
+        }
+        let reference = reference.ok_or(DriverError::ElementNotFound)?;
         let mut state = self.state.lock().expect("控件状态锁中毒");
         state.remote_reference = Some(reference.clone());
         state.generation = generation;

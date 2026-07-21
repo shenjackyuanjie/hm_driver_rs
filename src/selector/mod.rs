@@ -157,25 +157,30 @@ impl Selector {
         let dialect = driver.dialect().await?;
         let prefix = dialect.selector();
         let mut current = format!("{prefix}#seed");
+        let generation = driver.generation();
         for condition in &self.conditions {
-            let (method, args) = match condition {
+            let (method, args, dependency) = match condition {
                 SelectorCondition::String { name, pattern } => {
-                    (mapped_attribute(dialect, name), pattern.argument())
+                    (mapped_attribute(dialect, name), pattern.argument(), None)
                 }
-                SelectorCondition::Boolean { name, value } => (*name, json!([value])),
+                SelectorCondition::Boolean { name, value } => (*name, json!([value]), None),
                 SelectorCondition::Before(selector) => {
                     let other = Box::pin(selector.build_remote(driver)).await?;
-                    ("isBefore", json!([other]))
+                    ("isBefore", json!([other]), Some(other))
                 }
                 SelectorCondition::After(selector) => {
                     let other = Box::pin(selector.build_remote(driver)).await?;
-                    ("isAfter", json!([other]))
+                    ("isAfter", json!([other]), Some(other))
                 }
             };
             let result = driver
                 .call_api_raw(&format!("{prefix}.{method}"), Some(&current), args)
-                .await?;
-            current = result
+                .await;
+            driver.queue_remote_reference(current, generation);
+            if let Some(dependency) = dependency {
+                driver.queue_remote_reference(dependency, generation);
+            }
+            current = result?
                 .as_str()
                 .ok_or_else(|| DriverError::Protocol("Selector API 未返回远端引用".into()))?
                 .to_owned();
@@ -262,6 +267,7 @@ mod tests {
         let driver = HmDriver::with_test_rpc(rpc, ApiDialect::Modern);
         let selector = Selector::new().id("title").text("设置").enabled(true);
         assert_eq!(selector.build_remote(&driver).await.unwrap(), "On#3");
+        assert_eq!(driver.queued_reference_count(), 2);
         assert_eq!(
             *calls.lock().await,
             vec![

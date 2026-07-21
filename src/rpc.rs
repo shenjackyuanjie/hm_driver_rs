@@ -61,6 +61,29 @@ struct RpcConnection {
     buffer: Vec<u8>,
 }
 
+struct InFlightGuard<'a> {
+    valid: &'a AtomicBool,
+    armed: bool,
+}
+
+impl<'a> InFlightGuard<'a> {
+    fn new(valid: &'a AtomicBool) -> Self {
+        Self { valid, armed: true }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for InFlightGuard<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            self.valid.store(false, Ordering::Release);
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct RpcResponse {
     #[serde(default)]
@@ -134,6 +157,9 @@ impl RpcClient {
         bytes.push(b'\n');
         let request_timeout = self.inner.timeout;
         let mut connection = self.inner.connection.lock().await;
+        // Dropping an in-flight call after it may have written a request leaves the stream
+        // response boundary unknown, especially for Agents which omit request_id.
+        let mut in_flight = InFlightGuard::new(&self.inner.valid);
         let operation = async {
             connection
                 .stream
@@ -164,7 +190,9 @@ impl RpcClient {
             }
             Err(DriverError::Protocol("连续收到 32 个无关响应".into()))
         };
-        match timeout(request_timeout, operation).await {
+        let outcome = timeout(request_timeout, operation).await;
+        in_flight.disarm();
+        match outcome {
             Ok(Ok(value)) => Ok(value),
             Ok(Err(error @ DriverError::Hypium(_))) => Err(error),
             Ok(Err(error)) => {
@@ -353,5 +381,34 @@ mod tests {
             Err(DriverError::RpcTimeout { .. })
         ));
         assert!(!client.is_valid());
+    }
+
+    #[tokio::test]
+    async fn cancelling_in_flight_call_invalidates_session() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let request_received = Arc::new(tokio::sync::Notify::new());
+        let server_notification = request_received.clone();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 256];
+            let _ = stream.read(&mut request).await;
+            server_notification.notify_one();
+            std::future::pending::<()>().await;
+        });
+        let client =
+            RpcClient::connect(port, Duration::from_secs(1), Duration::from_secs(30), 1024)
+                .await
+                .unwrap();
+        let task_client = client.clone();
+        let task = tokio::spawn(async move { task_client.call("x", None, json!([])).await });
+        request_received.notified().await;
+        task.abort();
+        let _ = task.await;
+        assert!(!client.is_valid());
+        assert!(matches!(
+            client.call("x", None, json!([])).await,
+            Err(DriverError::SessionInvalid)
+        ));
     }
 }

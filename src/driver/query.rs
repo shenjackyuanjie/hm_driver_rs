@@ -31,14 +31,17 @@ impl HmDriver {
     pub async fn find(&self, selector: &Selector) -> Result<Option<Element>> {
         let index = selector.selected_index();
         let references = self.find_remote_references(selector).await?;
-        Ok(references.get(index).cloned().map(|reference| {
-            Element::new(
-                self.clone(),
-                selector.clone(),
-                index,
-                reference,
-                self.generation(),
-            )
+        let generation = self.generation();
+        let mut selected = None;
+        for (reference_index, reference) in references.into_iter().enumerate() {
+            if reference_index == index {
+                selected = Some(reference);
+            } else {
+                self.queue_remote_reference(reference, generation);
+            }
+        }
+        Ok(selected.map(|reference| {
+            Element::new(self.clone(), selector.clone(), index, reference, generation)
         }))
     }
 
@@ -130,8 +133,9 @@ impl HmDriver {
                 Some(&driver_reference),
                 json!([selector_reference]),
             )
-            .await?;
+            .await;
         self.queue_remote_reference(selector_reference, self.generation());
+        let result = result?;
         match result {
             Value::Null => Ok(Vec::new()),
             Value::String(reference) => Ok(vec![reference]),
