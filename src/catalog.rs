@@ -2,8 +2,9 @@ use crate::agent::AgentProfile;
 use crate::{DriverError, Result};
 use serde::Deserialize;
 
+/// 随 crate 随带的官方 Agent 清单，可在不连接设备的情况下查阅已验证的 Agent 信息。
 #[derive(Debug, Deserialize)]
-pub(crate) struct AgentCatalog {
+pub struct AgentCatalog {
     pub source_package: String,
     pub source_wheel: String,
     pub agents: Vec<AgentProfile>,

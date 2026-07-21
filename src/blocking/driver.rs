@@ -67,6 +67,10 @@ impl HmDriver {
         self.inner.agent_profile()
     }
 
+    pub fn dialect(&self) -> Result<crate::ApiDialect> {
+        block_on(self.inner.dialect())?
+    }
+
     pub fn recover(&self) -> Result<()> {
         block_on(self.inner.recover())?
     }
@@ -239,6 +243,14 @@ impl HmDriver {
 
     pub fn list_forwards(&self) -> Result<Vec<ForwardEntry>> {
         block_on(self.inner.list_forwards())?
+    }
+
+    pub fn forward(&self, local_port: u16, remote: &str) -> Result<()> {
+        block_on(self.inner.forward(local_port, remote))?
+    }
+
+    pub fn remove_forward(&self, local_port: u16, remote: &str) -> Result<()> {
+        block_on(self.inner.remove_forward(local_port, remote))?
     }
 
     pub fn screenshot(&self) -> Result<Vec<u8>> {

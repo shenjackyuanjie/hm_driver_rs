@@ -202,7 +202,8 @@ impl HmDriver {
         self.inner.generation.load(Ordering::Acquire)
     }
 
-    pub(crate) async fn dialect(&self) -> Result<ApiDialect> {
+    /// 返回当前会话协商出的 Hypium API 方言（Modern/Legacy）。
+    pub async fn dialect(&self) -> Result<ApiDialect> {
         self.inner
             .state
             .lock()

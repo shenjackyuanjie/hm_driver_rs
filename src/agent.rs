@@ -74,7 +74,8 @@ impl FromStr for UitestVersion {
     }
 }
 
-pub(crate) struct AgentResolver {
+/// 根据设备架构与 uitest 版本预测将使用的 Agent，无需实际连接设备。
+pub struct AgentResolver {
     catalog: AgentCatalog,
 }
 

@@ -12,8 +12,10 @@ use tokio::time::timeout;
 const MODULE: &str = "com.ohos.devicetest.hypiumApiHelper";
 const METHOD: &str = "callHypiumApi";
 
+/// 设备端 Hypium API 的方言：区分现代 `Driver`/`On`/`Component`
+/// 体系与旧版 `UiDriver`/`By`/`UiComponent` 体系。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ApiDialect {
+pub enum ApiDialect {
     Modern,
     Legacy,
 }

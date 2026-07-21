@@ -2,7 +2,7 @@
 
 use super::{HmDriver, next_operation_id};
 use crate::selector::{Element, Selector};
-use crate::ui::{UiNode, parse_layout};
+use crate::ui::UiNode;
 use crate::xpath::XPathElement;
 use crate::{DriverError, Result};
 use serde_json::{Value, json};
@@ -21,7 +21,7 @@ impl HmDriver {
         let result = async {
             self.inner.hdc.receive_file(&remote, &local).await?;
             let bytes = tokio::fs::read(&local).await?;
-            parse_layout(serde_json::from_slice(&bytes)?)
+            UiNode::from_layout_json(serde_json::from_slice(&bytes)?)
         }
         .await;
         let _ = self.inner.hdc.shell(format!("rm -f {remote}")).await;

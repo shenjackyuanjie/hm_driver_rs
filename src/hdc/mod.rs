@@ -46,6 +46,20 @@ impl HdcConfig {
         self.server = Some((host.into(), port));
         self
     }
+
+    /// 读取已配置的 HDC 可执行文件路径（未显式设置时为 `None`，将在
+    /// `HdcRunner::new` 时从 `HDC_PATH`/`PATH` 自动推导）。
+    pub fn path(&self) -> Option<&std::path::Path> {
+        self.path.as_deref()
+    }
+
+    /// 读取已配置的 HDC server 地址（未显式设置时为 `None`，将在
+    /// `HdcRunner::new` 时从 `HDC_SERVER_HOST`/`HDC_SERVER_PORT` 自动推导）。
+    pub fn server(&self) -> Option<(&str, u16)> {
+        self.server
+            .as_ref()
+            .map(|(host, port)| (host.as_str(), *port))
+    }
 }
 
 /// HDC 命令的成功输出。

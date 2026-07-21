@@ -2,7 +2,6 @@
 
 use super::Selector;
 use crate::driver::HmDriver;
-use crate::ui::parse_bounds_value;
 use crate::{Bounds, DriverError, Result};
 use serde_json::{Value, json};
 use std::sync::Mutex;
@@ -181,7 +180,7 @@ impl Element {
 
     pub async fn bounds(&self) -> Result<Bounds> {
         let value = self.operate("getBounds", json!([])).await?;
-        parse_bounds_value(&value)
+        Bounds::parse_value(&value)
             .ok_or_else(|| DriverError::Protocol("控件 bounds 格式无效".into()))
     }
 

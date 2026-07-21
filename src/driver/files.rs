@@ -33,6 +33,16 @@ impl HmDriver {
         self.inner.hdc.list_forwards().await
     }
 
+    /// 建立一个自定义端口转发，与驱动自身使用的 RPC 转发互不影响。
+    pub async fn forward(&self, local_port: u16, remote: &str) -> Result<()> {
+        self.inner.hdc.forward(local_port, remote).await
+    }
+
+    /// 移除一个自定义端口转发。
+    pub async fn remove_forward(&self, local_port: u16, remote: &str) -> Result<()> {
+        self.inner.hdc.remove_forward(local_port, remote).await
+    }
+
     pub async fn screenshot(&self) -> Result<Vec<u8>> {
         self.screenshot_with_method(ScreenshotMethod::Auto).await
     }

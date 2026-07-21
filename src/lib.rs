@@ -18,17 +18,20 @@ mod xpath;
 #[cfg(feature = "blocking")]
 pub mod blocking;
 
-pub use agent::{AgentProfile, AgentSource, CompatibilityStatus, HarmonyTransport};
+pub use agent::{AgentProfile, AgentResolver, AgentSource, CompatibilityStatus, HarmonyTransport};
+pub use catalog::AgentCatalog;
 pub use driver::{HmDriver, HmDriverBuilder};
 pub use error::{DriverError, Result};
 pub use gesture::{Gesture, GesturePath};
 pub use hdc::{CommandOutput, HdcConfig};
 pub use keycode::KeyCode;
+pub use rpc::ApiDialect;
 pub use selector::{Element, ElementInfo, MatchPattern, Selector};
 pub use types::{
     AbilityInfo, AppIdentifier, Bounds, DeviceDescriptor, DeviceInfo, DeviceSelector, DeviceSerial,
     DeviceStatus, DisplayRotation, DisplaySize, ForwardEndpoint, ForwardEntry, NormalizedPoint,
     OpenUrlMode, Point, Position, ScreenState, ScreenshotMethod, SwipeArea, SwipeDirection,
+    validate_ability,
 };
 pub use ui::UiNode;
 pub use xpath::XPathElement;

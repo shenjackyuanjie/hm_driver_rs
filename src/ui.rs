@@ -33,7 +33,20 @@ impl UiNode {
         self.attributes
             .get("bounds")
             .or_else(|| self.extra.get("bounds"))
-            .and_then(parse_bounds_value)
+            .and_then(Bounds::parse_value)
+    }
+
+    /// 将 `uitest dumpLayout` 的原始 JSON（可能带有 `root` 包装层）解析为 [`UiNode`]。
+    ///
+    /// 供在不通过 [`crate::HmDriver::ui_tree`] 的情况下（例如自行用 `raw_shell`/
+    /// `pull_file` 取回 dump 文件）复用同样的解析逻辑。
+    pub fn from_layout_json(value: Value) -> Result<UiNode> {
+        let root = if let Some(root) = value.get("root") {
+            root.clone()
+        } else {
+            value
+        };
+        serde_json::from_value(root).map_err(DriverError::Json)
     }
 
     pub(crate) fn attribute_snapshot(&self) -> BTreeMap<String, String> {
@@ -48,67 +61,6 @@ impl UiNode {
         }
         result
     }
-}
-
-pub(crate) fn parse_layout(value: Value) -> Result<UiNode> {
-    let root = if let Some(root) = value.get("root") {
-        root.clone()
-    } else {
-        value
-    };
-    serde_json::from_value(root).map_err(DriverError::Json)
-}
-
-pub(crate) fn parse_bounds_value(value: &Value) -> Option<Bounds> {
-    match value {
-        Value::Object(object) => {
-            let integer = |name: &str| {
-                object
-                    .get(name)?
-                    .as_i64()
-                    .and_then(|v| i32::try_from(v).ok())
-            };
-            Some(Bounds {
-                left: integer("left")?,
-                top: integer("top")?,
-                right: integer("right")?,
-                bottom: integer("bottom")?,
-            })
-        }
-        Value::Array(values) if values.len() == 4 => {
-            let mut numbers = [0_i32; 4];
-            for (index, value) in values.iter().enumerate() {
-                numbers[index] = i32::try_from(value.as_i64()?).ok()?;
-            }
-            Some(Bounds {
-                left: numbers[0],
-                top: numbers[1],
-                right: numbers[2],
-                bottom: numbers[3],
-            })
-        }
-        Value::String(value) => parse_bounds_text(value),
-        _ => None,
-    }
-    .filter(|bounds| bounds.is_valid())
-}
-
-pub(crate) fn parse_bounds_text(value: &str) -> Option<Bounds> {
-    let numbers: Vec<i32> = value
-        .split(|ch: char| !ch.is_ascii_digit() && ch != '-')
-        .filter(|part| !part.is_empty())
-        .filter_map(|part| part.parse().ok())
-        .collect();
-    if numbers.len() != 4 {
-        return None;
-    }
-    let bounds = Bounds {
-        left: numbers[0],
-        top: numbers[1],
-        right: numbers[2],
-        bottom: numbers[3],
-    };
-    bounds.is_valid().then_some(bounds)
 }
 
 pub(crate) fn sanitize_xml_text(value: &str) -> String {
@@ -139,7 +91,7 @@ mod tests {
     #[test]
     fn parses_common_bounds_forms() {
         assert_eq!(
-            parse_bounds_value(&json!("[1,2][30,40]")),
+            Bounds::parse_value(&json!("[1,2][30,40]")),
             Some(Bounds {
                 left: 1,
                 top: 2,
@@ -148,7 +100,7 @@ mod tests {
             })
         );
         assert_eq!(
-            parse_bounds_value(&json!({"left": 1, "top": 2, "right": 30, "bottom": 40})),
+            Bounds::parse_value(&json!({"left": 1, "top": 2, "right": 30, "bottom": 40})),
             Some(Bounds {
                 left: 1,
                 top: 2,

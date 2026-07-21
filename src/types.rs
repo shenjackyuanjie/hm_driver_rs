@@ -181,6 +181,61 @@ impl Bounds {
     pub const fn height(self) -> i32 {
         self.bottom - self.top
     }
+
+    /// 解析官方 `uitest` 常见的 bounds JSON 形式：
+    /// `{"left":..,"top":..,"right":..,"bottom":..}` 或 `[left, top, right, bottom]`。
+    pub fn parse_value(value: &serde_json::Value) -> Option<Bounds> {
+        match value {
+            serde_json::Value::Object(object) => {
+                let integer = |name: &str| {
+                    object
+                        .get(name)?
+                        .as_i64()
+                        .and_then(|v| i32::try_from(v).ok())
+                };
+                Some(Bounds {
+                    left: integer("left")?,
+                    top: integer("top")?,
+                    right: integer("right")?,
+                    bottom: integer("bottom")?,
+                })
+            }
+            serde_json::Value::Array(values) if values.len() == 4 => {
+                let mut numbers = [0_i32; 4];
+                for (index, value) in values.iter().enumerate() {
+                    numbers[index] = i32::try_from(value.as_i64()?).ok()?;
+                }
+                Some(Bounds {
+                    left: numbers[0],
+                    top: numbers[1],
+                    right: numbers[2],
+                    bottom: numbers[3],
+                })
+            }
+            serde_json::Value::String(value) => Bounds::parse_text(value),
+            _ => None,
+        }
+        .filter(|bounds| bounds.is_valid())
+    }
+
+    /// 解析官方 `uitest` 常见的 bounds 文本形式，例如 `[1,2][30,40]`。
+    pub fn parse_text(value: &str) -> Option<Bounds> {
+        let numbers: Vec<i32> = value
+            .split(|ch: char| !ch.is_ascii_digit() && ch != '-')
+            .filter(|part| !part.is_empty())
+            .filter_map(|part| part.parse().ok())
+            .collect();
+        if numbers.len() != 4 {
+            return None;
+        }
+        let bounds = Bounds {
+            left: numbers[0],
+            top: numbers[1],
+            right: numbers[2],
+            bottom: numbers[3],
+        };
+        bounds.is_valid().then_some(bounds)
+    }
 }
 
 /// 显示区域大小。
@@ -373,7 +428,9 @@ impl AppIdentifier {
     }
 }
 
-pub(crate) fn validate_ability(value: &str) -> Result<()> {
+/// 校验 Ability 类名是否符合 HarmonyOS 标识符规则，供在 [`crate::HmDriver::start_app`]
+/// 之前预先检查使用。
+pub fn validate_ability(value: &str) -> Result<()> {
     if is_valid_identifier(value) {
         Ok(())
     } else {
