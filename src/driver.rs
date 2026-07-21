@@ -2,7 +2,9 @@ use crate::agent::{
     AgentProfile, AgentResolver, AgentSource, CompatibilityStatus, HarmonyTransport,
     materialize_agent,
 };
+use crate::gesture::Gesture;
 use crate::hdc::{CommandOutput, HdcConfig, HdcRunner};
+use crate::keycode::KeyCode;
 use crate::rpc::{ApiDialect, RpcClient};
 use crate::selector::{Element, Selector};
 use crate::types::{validate_ability, *};
@@ -13,6 +15,7 @@ use regex::Regex;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -20,6 +23,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tempfile::tempdir;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
+use url::Url;
 
 static OPERATION_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -349,6 +353,7 @@ impl HmDriver {
             api_version,
             system_version,
             cpu_abi,
+            wlan_ip: self.wlan_ip().await?,
             display_size: self.display_size().await?,
             display_rotation: self.display_rotation().await?,
         })
@@ -359,7 +364,21 @@ impl HmDriver {
     }
 
     pub async fn screen_off(&self) -> Result<()> {
-        self.press_key(18).await
+        self.press_key_code(KeyCode::Power).await
+    }
+
+    pub async fn screen_state(&self) -> Result<ScreenState> {
+        let output = self
+            .inner
+            .hdc
+            .shell("hidumper -s PowerManagerService -a -s")
+            .await?;
+        parse_screen_state(&output.stdout)
+    }
+
+    pub async fn wlan_ip(&self) -> Result<Option<IpAddr>> {
+        let output = self.inner.hdc.shell("ifconfig").await?;
+        parse_wlan_ip(&output.stdout)
     }
 
     pub async fn unlock(&self) -> Result<()> {
@@ -377,11 +396,33 @@ impl HmDriver {
         if key_code > 3200 {
             return Err(DriverError::InvalidCoordinate("按键码超过 3200".into()));
         }
+        self.send_key_code(i32::try_from(key_code).expect("按键码已经限制为 3200 以下"))
+            .await
+    }
+
+    async fn send_key_code(&self, key_code: i32) -> Result<()> {
+        if !(-1..=3200).contains(&key_code) {
+            return Err(DriverError::InvalidCoordinate(
+                "按键码必须位于 -1 到 3200".into(),
+            ));
+        }
         self.inner
             .hdc
             .shell(format!("uitest uiInput keyEvent {key_code}"))
             .await
             .map(|_| ())
+    }
+
+    pub async fn press_key_code(&self, key_code: KeyCode) -> Result<()> {
+        self.send_key_code(key_code.value()).await
+    }
+
+    pub async fn go_back(&self) -> Result<()> {
+        self.press_key_code(KeyCode::Back).await
+    }
+
+    pub async fn go_home(&self) -> Result<()> {
+        self.press_key_code(KeyCode::Home).await
     }
 
     pub async fn click(&self, point: Point) -> Result<()> {
@@ -398,8 +439,18 @@ impl HmDriver {
             .await
     }
 
+    pub async fn double_click_position(&self, position: Position) -> Result<()> {
+        self.double_click(self.absolute_position(position).await?)
+            .await
+    }
+
     pub async fn long_click(&self, point: Point) -> Result<()> {
         self.coordinate_call("longClick", json!([point.x, point.y]))
+            .await
+    }
+
+    pub async fn long_click_position(&self, position: Position) -> Result<()> {
+        self.long_click(self.absolute_position(position).await?)
             .await
     }
 
@@ -411,6 +462,89 @@ impl HmDriver {
         }
         self.coordinate_call("swipe", json!([from.x, from.y, to.x, to.y, speed]))
             .await
+    }
+
+    pub async fn swipe_positions(&self, from: Position, to: Position, speed: u32) -> Result<()> {
+        let size = self.display_size().await?;
+        self.swipe(from.resolve(size)?, to.resolve(size)?, speed)
+            .await
+    }
+
+    pub async fn swipe_direction(
+        &self,
+        direction: SwipeDirection,
+        area: SwipeArea,
+        scale: f64,
+        speed: u32,
+    ) -> Result<()> {
+        if !scale.is_finite() || !(0.0..=1.0).contains(&scale) || scale == 0.0 {
+            return Err(DriverError::InvalidCoordinate(
+                "方向滑动比例必须位于 0 到 1 之间".into(),
+            ));
+        }
+        let bounds = area.resolve(self.display_size().await?)?;
+        let center = bounds.center();
+        let horizontal = (f64::from(bounds.width()) * scale / 2.0).round() as i32;
+        let vertical = (f64::from(bounds.height()) * scale / 2.0).round() as i32;
+        let (from, to) = match direction {
+            SwipeDirection::Up => (
+                Point::new(center.x, center.y + vertical),
+                Point::new(center.x, center.y - vertical),
+            ),
+            SwipeDirection::Down => (
+                Point::new(center.x, center.y - vertical),
+                Point::new(center.x, center.y + vertical),
+            ),
+            SwipeDirection::Left => (
+                Point::new(center.x + horizontal, center.y),
+                Point::new(center.x - horizontal, center.y),
+            ),
+            SwipeDirection::Right => (
+                Point::new(center.x - horizontal, center.y),
+                Point::new(center.x + horizontal, center.y),
+            ),
+        };
+        self.swipe(from, to, speed).await
+    }
+
+    pub async fn perform_gesture(&self, gesture: &Gesture) -> Result<()> {
+        let matrix = gesture.compile(self.display_size().await?)?;
+        let total_points = matrix.first().map(Vec::len).unwrap_or_default();
+        let reference = self
+            .call_api_raw(
+                "PointerMatrix.create",
+                None,
+                json!([matrix.len(), total_points]),
+            )
+            .await?
+            .as_str()
+            .ok_or_else(|| DriverError::Protocol("PointerMatrix.create 未返回远端引用".into()))?
+            .to_owned();
+        let result = async {
+            for (finger_index, points) in matrix.iter().enumerate() {
+                for (point_index, point) in points.iter().enumerate() {
+                    self.call_api_raw(
+                        "PointerMatrix.setPoint",
+                        Some(&reference),
+                        json!([
+                            finger_index,
+                            point_index,
+                            {"x": point.encoded_x()?, "y": point.point.y}
+                        ]),
+                    )
+                    .await?;
+                }
+            }
+            self.driver_call(
+                "injectMultiPointerAction",
+                json!([reference, gesture.injection_speed_value()]),
+            )
+            .await
+            .map(|_| ())
+        }
+        .await;
+        self.queue_remote_reference(reference, self.generation());
+        result
     }
 
     pub async fn input_text(&self, text: &str) -> Result<()> {
@@ -444,6 +578,21 @@ impl HmDriver {
             .map(|_| ())
     }
 
+    pub async fn open_url(&self, value: &str, mode: OpenUrlMode) -> Result<()> {
+        let url = Url::parse(value).map_err(|error| DriverError::InvalidUrl(error.to_string()))?;
+        if url.scheme().is_empty() {
+            return Err(DriverError::InvalidUrl("URL 缺少 scheme".into()));
+        }
+        let url = shell_quote(url.as_str());
+        let command = match mode {
+            OpenUrlMode::SystemBrowser => {
+                format!("aa start -A ohos.want.action.viewData -e entity.system.browsable -U {url}")
+            }
+            OpenUrlMode::Default => format!("aa start -U {url}"),
+        };
+        self.inner.hdc.shell(command).await.map(|_| ())
+    }
+
     pub async fn stop_app(&self, bundle: &AppIdentifier) -> Result<()> {
         self.inner
             .hdc
@@ -464,20 +613,36 @@ impl HmDriver {
             .map(|_| ())
     }
 
-    pub async fn main_ability(&self, bundle: &AppIdentifier) -> Result<Option<String>> {
+    pub async fn app_info(&self, bundle: &AppIdentifier) -> Result<Value> {
         let output = self
             .inner
             .hdc
             .shell(format!("bm dump -n {}", bundle.as_str()))
             .await?;
         let Some(start) = output.stdout.find('{') else {
-            return Ok(None);
+            return Err(DriverError::Protocol("应用信息不包含 JSON 对象".into()));
         };
         let Some(end) = output.stdout.rfind('}') else {
-            return Ok(None);
+            return Err(DriverError::Protocol("应用信息 JSON 不完整".into()));
         };
-        let value: Value = serde_json::from_str(&output.stdout[start..=end])?;
-        Ok(find_string_key(&value, "mainAbility"))
+        serde_json::from_str(&output.stdout[start..=end]).map_err(DriverError::Json)
+    }
+
+    pub async fn app_abilities(&self, bundle: &AppIdentifier) -> Result<Vec<AbilityInfo>> {
+        Ok(parse_ability_infos(&self.app_info(bundle).await?))
+    }
+
+    pub async fn main_ability_info(&self, bundle: &AppIdentifier) -> Result<Option<AbilityInfo>> {
+        let value = self.app_info(bundle).await?;
+        Ok(select_main_ability(parse_ability_infos(&value)))
+    }
+
+    pub async fn main_ability(&self, bundle: &AppIdentifier) -> Result<Option<String>> {
+        let value = self.app_info(bundle).await?;
+        let abilities = parse_ability_infos(&value);
+        Ok(select_main_ability(abilities)
+            .map(|ability| ability.name)
+            .or_else(|| find_string_key(&value, "mainAbility")))
     }
 
     pub async fn current_app(&self) -> Result<Option<(AppIdentifier, String)>> {
@@ -525,32 +690,85 @@ impl HmDriver {
         self.inner.hdc.shell(command).await
     }
 
+    pub async fn list_forwards(&self) -> Result<Vec<ForwardEntry>> {
+        self.inner.hdc.list_forwards().await
+    }
+
     pub async fn screenshot(&self) -> Result<Vec<u8>> {
+        self.screenshot_with_method(ScreenshotMethod::Auto).await
+    }
+
+    pub async fn screenshot_with_method(&self, method: ScreenshotMethod) -> Result<Vec<u8>> {
         let directory = tempdir()?;
         let local = directory.path().join("screen.bin");
-        let remote = format!("/data/local/tmp/hm_driver_{}.png", next_operation_id());
-        let first = self
-            .inner
-            .hdc
-            .shell(format!("snapshot_display -f {remote}"))
-            .await;
-        if first.is_err() {
-            self.inner
-                .hdc
-                .shell(format!("uitest screenCap -p {remote}"))
-                .await?;
+        let operation_id = next_operation_id();
+        let snapshot_remote = format!("/data/local/tmp/hm_driver_{operation_id}.jpeg");
+        let screen_cap_remote = format!("/data/local/tmp/hm_driver_{operation_id}.png");
+        match method {
+            ScreenshotMethod::Auto => {
+                let first = self
+                    .capture_screenshot(&snapshot_remote, &local, ScreenshotMethod::SnapshotDisplay)
+                    .await;
+                let _ = self
+                    .inner
+                    .hdc
+                    .shell(format!("rm -f {snapshot_remote}"))
+                    .await;
+                match first {
+                    Ok(bytes) => Ok(bytes),
+                    Err(_) => {
+                        let result = self
+                            .capture_screenshot(
+                                &screen_cap_remote,
+                                &local,
+                                ScreenshotMethod::ScreenCap,
+                            )
+                            .await;
+                        let _ = self
+                            .inner
+                            .hdc
+                            .shell(format!("rm -f {screen_cap_remote}"))
+                            .await;
+                        result
+                    }
+                }
+            }
+            ScreenshotMethod::SnapshotDisplay => {
+                let result = self
+                    .capture_screenshot(&snapshot_remote, &local, ScreenshotMethod::SnapshotDisplay)
+                    .await;
+                let _ = self
+                    .inner
+                    .hdc
+                    .shell(format!("rm -f {snapshot_remote}"))
+                    .await;
+                result
+            }
+            ScreenshotMethod::ScreenCap => {
+                let result = self
+                    .capture_screenshot(&screen_cap_remote, &local, ScreenshotMethod::ScreenCap)
+                    .await;
+                let _ = self
+                    .inner
+                    .hdc
+                    .shell(format!("rm -f {screen_cap_remote}"))
+                    .await;
+                result
+            }
         }
-        let result = async {
-            self.inner.hdc.receive_file(&remote, &local).await?;
-            tokio::fs::read(&local).await.map_err(DriverError::Io)
-        }
-        .await;
-        let _ = self.inner.hdc.shell(format!("rm -f {remote}")).await;
-        result
     }
 
     pub async fn screenshot_to(&self, path: impl AsRef<Path>) -> Result<()> {
         tokio::fs::write(path, self.screenshot().await?).await?;
+        Ok(())
+    }
+
+    pub async fn screenshot_to_with_method(
+        &self,
+        path: impl AsRef<Path>,
+        method: ScreenshotMethod,
+    ) -> Result<()> {
+        tokio::fs::write(path, self.screenshot_with_method(method).await?).await?;
         Ok(())
     }
 
@@ -586,6 +804,22 @@ impl HmDriver {
         }))
     }
 
+    pub async fn exists(&self, selector: &Selector) -> Result<bool> {
+        Ok(self.find(selector).await?.is_some())
+    }
+
+    pub async fn count(&self, selector: &Selector) -> Result<usize> {
+        Ok(self.find_all(selector).await?.len())
+    }
+
+    pub async fn click_if_exists(&self, selector: &Selector) -> Result<bool> {
+        let Some(element) = self.find(selector).await? else {
+            return Ok(false);
+        };
+        element.click().await?;
+        Ok(true)
+    }
+
     pub async fn find_all(&self, selector: &Selector) -> Result<Vec<Element>> {
         let generation = self.generation();
         Ok(self
@@ -613,11 +847,16 @@ impl HmDriver {
     }
 
     pub async fn xpath(&self, expression: &str) -> Result<XPathElement> {
-        let root = self.ui_tree().await?;
-        XPathElement::query(self.clone(), &root, expression)?
-            .into_iter()
-            .next()
+        self.xpath_optional(expression)
+            .await?
             .ok_or(DriverError::XPathNotFound)
+    }
+
+    pub async fn xpath_optional(&self, expression: &str) -> Result<Option<XPathElement>> {
+        let root = self.ui_tree().await?;
+        Ok(XPathElement::query(self.clone(), &root, expression)?
+            .into_iter()
+            .next())
     }
 
     pub async fn xpath_all(&self, expression: &str) -> Result<Vec<XPathElement>> {
@@ -627,6 +866,14 @@ impl HmDriver {
 
     pub async fn xpath_exists(&self, expression: &str) -> Result<bool> {
         Ok(!self.xpath_all(expression).await?.is_empty())
+    }
+
+    pub async fn xpath_click_if_exists(&self, expression: &str) -> Result<bool> {
+        let Some(element) = self.xpath_optional(expression).await? else {
+            return Ok(false);
+        };
+        element.click().await?;
+        Ok(true)
     }
 
     pub(crate) async fn find_remote_references(&self, selector: &Selector) -> Result<Vec<String>> {
@@ -729,16 +976,27 @@ impl HmDriver {
     }
 
     async fn absolute_position(&self, position: Position) -> Result<Point> {
-        match position {
-            Position::Absolute(point) => Ok(point),
-            Position::Normalized(point) => {
-                let size = self.display_size().await?;
-                Ok(Point::new(
-                    (point.x * f64::from(size.width)).round() as i32,
-                    (point.y * f64::from(size.height)).round() as i32,
-                ))
+        position.resolve(self.display_size().await?)
+    }
+
+    async fn capture_screenshot(
+        &self,
+        remote: &str,
+        local: &Path,
+        method: ScreenshotMethod,
+    ) -> Result<Vec<u8>> {
+        let command = match method {
+            ScreenshotMethod::SnapshotDisplay => format!("snapshot_display -f {remote}"),
+            ScreenshotMethod::ScreenCap => format!("uitest screenCap -p {remote}"),
+            ScreenshotMethod::Auto => {
+                return Err(DriverError::Protocol(
+                    "内部截图方法不能再次使用 Auto".into(),
+                ));
             }
-        }
+        };
+        self.inner.hdc.shell(command).await?;
+        self.inner.hdc.receive_file(remote, local).await?;
+        tokio::fs::read(local).await.map_err(DriverError::Io)
     }
 
     async fn parameter(&self, name: &str) -> Result<String> {
@@ -1080,6 +1338,146 @@ fn next_operation_id() -> String {
     format!("{timestamp:x}{counter:x}")
 }
 
+fn parse_screen_state(output: &str) -> Result<ScreenState> {
+    let pattern = Regex::new(r"Current State:\s*([A-Za-z_]+)")
+        .map_err(|error| DriverError::Protocol(error.to_string()))?;
+    let raw = pattern
+        .captures(output)
+        .and_then(|capture| capture.get(1))
+        .map(|value| value.as_str().to_ascii_uppercase())
+        .ok_or_else(|| DriverError::Protocol("无法解析屏幕电源状态".into()))?;
+    Ok(match raw.as_str() {
+        "INACTIVE" => ScreenState::Inactive,
+        "SLEEP" => ScreenState::Sleep,
+        "AWAKE" => ScreenState::Awake,
+        _ => ScreenState::Unknown(raw),
+    })
+}
+
+fn parse_wlan_ip(output: &str) -> Result<Option<IpAddr>> {
+    let address_pattern = Regex::new(r"(?:inet addr:|inet\s+)([0-9A-Fa-f:.]+)")
+        .map_err(|error| DriverError::Protocol(error.to_string()))?;
+    let normalized = output.replace("\r\n", "\n");
+    let preferred = normalized.split("\n\n").find(|block| {
+        block
+            .lines()
+            .next()
+            .map(str::trim_start)
+            .is_some_and(|line| line.starts_with("wlan") || line.starts_with("wifi"))
+    });
+    Ok(
+        parse_non_loopback_ip(preferred.unwrap_or(output), &address_pattern)
+            .or_else(|| preferred.and_then(|_| parse_non_loopback_ip(output, &address_pattern))),
+    )
+}
+
+fn parse_non_loopback_ip(output: &str, pattern: &Regex) -> Option<IpAddr> {
+    pattern
+        .captures_iter(output)
+        .filter_map(|capture| capture.get(1)?.as_str().parse::<IpAddr>().ok())
+        .find(|address| !address.is_loopback() && !address.is_unspecified())
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn parse_ability_infos(value: &Value) -> Vec<AbilityInfo> {
+    let mut result = Vec::new();
+    collect_ability_infos(value, None, &mut result);
+    result
+}
+
+fn collect_ability_infos(
+    value: &Value,
+    inherited_main_module: Option<&str>,
+    result: &mut Vec<AbilityInfo>,
+) {
+    let Value::Object(object) = value else {
+        if let Value::Array(values) = value {
+            for value in values {
+                collect_ability_infos(value, inherited_main_module, result);
+            }
+        }
+        return;
+    };
+    let main_module = object
+        .get("mainEntry")
+        .and_then(Value::as_str)
+        .or(inherited_main_module);
+    if let Some(modules) = object.get("hapModuleInfos").and_then(Value::as_array) {
+        collect_modules(modules, main_module, result);
+    }
+    for (key, child) in object {
+        if key != "hapModuleInfos" {
+            collect_ability_infos(child, main_module, result);
+        }
+    }
+}
+
+fn collect_modules(modules: &[Value], main_module: Option<&str>, result: &mut Vec<AbilityInfo>) {
+    for module in modules {
+        let module_main_ability = module
+            .get("mainAbility")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let module_name = module
+            .get("moduleName")
+            .or_else(|| module.get("name"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let Some(abilities) = module.get("abilityInfos").and_then(Value::as_array) else {
+            continue;
+        };
+        for raw in abilities {
+            let Some(name) = raw.get("name").and_then(Value::as_str) else {
+                continue;
+            };
+            let ability_module = raw
+                .get("moduleName")
+                .and_then(Value::as_str)
+                .unwrap_or(module_name);
+            result.push(AbilityInfo {
+                name: name.to_owned(),
+                module_name: ability_module.to_owned(),
+                module_main_ability: module_main_ability.clone(),
+                main_module: main_module.map(str::to_owned),
+                is_launcher: is_launcher_ability(raw),
+                raw: raw.clone(),
+            });
+        }
+    }
+}
+
+fn is_launcher_ability(value: &Value) -> bool {
+    value
+        .get("skills")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|skill| skill.get("actions").and_then(Value::as_array))
+        .flatten()
+        .filter_map(Value::as_str)
+        .any(|action| action == "action.system.home")
+}
+
+fn select_main_ability(mut abilities: Vec<AbilityInfo>) -> Option<AbilityInfo> {
+    abilities.sort_by_key(|ability| {
+        let mut score = 0_u8;
+        if ability.module_main_ability.as_deref() == Some(ability.name.as_str()) {
+            score += 1;
+        }
+        if ability.main_module.as_deref() == Some(ability.module_name.as_str()) {
+            score += 1;
+        }
+        (
+            std::cmp::Reverse(ability.is_launcher),
+            std::cmp::Reverse(score),
+        )
+    });
+    abilities.into_iter().next()
+}
+
 fn hex_sha256(bytes: &[u8]) -> String {
     let mut result = String::with_capacity(64);
     for byte in Sha256::digest(bytes) {
@@ -1106,6 +1504,11 @@ fn find_string_key(value: &Value, key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{GesturePath, NormalizedPoint};
+    use std::sync::Arc;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::TcpListener;
+    use tokio::sync::Mutex as TokioMutex;
 
     #[test]
     fn extracts_one_strict_four_part_version() {
@@ -1127,5 +1530,148 @@ mod tests {
     fn only_matches_exact_singleness_process() {
         let output = "shell 100 1 0 uitest start-daemon singleness\nshell 101 1 0 uitest start-daemon demo\n";
         assert_eq!(singleness_pids(output).collect::<Vec<_>>(), vec!["100"]);
+    }
+
+    #[test]
+    fn discovers_and_ranks_all_abilities() {
+        let value = json!({
+            "mainEntry": "entry",
+            "hapModuleInfos": [
+                {
+                    "moduleName": "feature",
+                    "mainAbility": "FeatureAbility",
+                    "abilityInfos": [{"name": "FeatureAbility", "moduleName": "feature", "skills": []}]
+                },
+                {
+                    "moduleName": "entry",
+                    "mainAbility": "EntryAbility",
+                    "abilityInfos": [
+                        {"name": "OtherAbility", "moduleName": "entry", "skills": []},
+                        {"name": "EntryAbility", "moduleName": "entry", "skills": [{"actions": ["action.system.home"]}]}
+                    ]
+                }
+            ]
+        });
+        let abilities = parse_ability_infos(&value);
+        assert_eq!(abilities.len(), 3);
+        let selected = select_main_ability(abilities).unwrap();
+        assert_eq!(selected.name, "EntryAbility");
+        assert!(selected.is_launcher);
+        assert_eq!(selected.raw["moduleName"], "entry");
+    }
+
+    #[test]
+    fn discovers_abilities_inside_wrapped_result() {
+        let value = json!({
+            "result": {
+                "mainEntry": "entry",
+                "hapModuleInfos": [{
+                    "moduleName": "entry",
+                    "mainAbility": "EntryAbility",
+                    "abilityInfos": [
+                        {"name": "EntryAbility", "moduleName": "entry", "skills": []},
+                        {"name": "ShareAbility", "moduleName": "entry", "skills": []}
+                    ]
+                }]
+            }
+        });
+        let abilities = parse_ability_infos(&value);
+        assert_eq!(abilities.len(), 2);
+        assert_eq!(abilities[0].main_module.as_deref(), Some("entry"));
+        assert_eq!(abilities[1].name, "ShareAbility");
+    }
+
+    #[test]
+    fn parses_screen_state_and_non_loopback_ip() {
+        assert_eq!(
+            parse_screen_state("Current State: AWAKE\n").unwrap(),
+            ScreenState::Awake
+        );
+        assert_eq!(
+            parse_wlan_ip("inet addr:127.0.0.1\ninet 192.168.1.20 netmask 255.255.255.0").unwrap(),
+            Some("192.168.1.20".parse().unwrap())
+        );
+        assert_eq!(
+            parse_wlan_ip(
+                "rmnet0 Link encap:Ethernet\n  inet addr:10.0.0.2\n\nwlan0 Link encap:Ethernet\n  inet addr:192.168.1.20\n"
+            )
+            .unwrap(),
+            Some("192.168.1.20".parse().unwrap())
+        );
+    }
+
+    #[test]
+    fn quotes_device_shell_url_as_one_argument() {
+        assert_eq!(
+            shell_quote("https://example.com/a'b"),
+            "'https://example.com/a'\\''b'"
+        );
+    }
+
+    #[tokio::test]
+    async fn submits_pointer_matrix_before_injecting_gesture() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let calls = Arc::new(TokioMutex::new(Vec::new()));
+        let server_calls = calls.clone();
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let (reader, mut writer) = stream.into_split();
+            let mut lines = BufReader::new(reader).lines();
+            while let Some(line) = lines.next_line().await.unwrap() {
+                let request: Value = serde_json::from_str(&line).unwrap();
+                let api = request["params"]["api"].as_str().unwrap().to_owned();
+                server_calls.lock().await.push(api.clone());
+                let result = match api.as_str() {
+                    "Driver.getDisplaySize" => json!({"x": 1000, "y": 2000}),
+                    "PointerMatrix.create" => json!("PointerMatrix#1"),
+                    _ => Value::Null,
+                };
+                let response = json!({
+                    "request_id": request["request_id"],
+                    "result": result,
+                    "exception": null
+                });
+                writer
+                    .write_all(serde_json::to_string(&response).unwrap().as_bytes())
+                    .await
+                    .unwrap();
+                writer.write_all(b"\n").await.unwrap();
+                if api == "Driver.injectMultiPointerAction" {
+                    break;
+                }
+            }
+        });
+        let rpc = RpcClient::connect(
+            port,
+            Duration::from_secs(1),
+            Duration::from_secs(1),
+            1024 * 1024,
+        )
+        .await
+        .unwrap();
+        let driver = HmDriver::with_test_rpc(rpc, ApiDialect::Modern);
+        let path = GesturePath::new(
+            Position::Normalized(NormalizedPoint::new(0.2, 0.2).unwrap()),
+            Duration::from_millis(50),
+        )
+        .unwrap()
+        .move_to(
+            Position::Normalized(NormalizedPoint::new(0.8, 0.8).unwrap()),
+            Duration::from_millis(50),
+        )
+        .unwrap();
+        driver.perform_gesture(&Gesture::new(path)).await.unwrap();
+        let calls = calls.lock().await;
+        assert_eq!(calls[0], "Driver.getDisplaySize");
+        assert_eq!(calls[1], "PointerMatrix.create");
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|api| api.as_str() == "PointerMatrix.setPoint")
+                .count(),
+            3
+        );
+        assert_eq!(calls.last().unwrap(), "Driver.injectMultiPointerAction");
     }
 }

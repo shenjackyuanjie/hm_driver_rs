@@ -205,6 +205,27 @@ pub struct Element {
     state: Mutex<ElementState>,
 }
 
+/// 一次性读取的完整控件属性。
+#[derive(Clone, Debug, PartialEq)]
+pub struct ElementInfo {
+    pub id: String,
+    pub key: String,
+    pub type_name: String,
+    pub text: String,
+    pub description: String,
+    pub hint: String,
+    pub selected: bool,
+    pub checked: bool,
+    pub enabled: bool,
+    pub focused: bool,
+    pub checkable: bool,
+    pub clickable: bool,
+    pub long_clickable: bool,
+    pub scrollable: bool,
+    pub bounds: Bounds,
+    pub bounds_center: crate::Point,
+}
+
 impl std::fmt::Debug for Element {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Element")
@@ -286,10 +307,106 @@ impl Element {
         self.operate(method, json!([])).await
     }
 
+    pub async fn id(&self) -> Result<String> {
+        value_string(self.attribute("id").await?, "id")
+    }
+
+    pub async fn key(&self) -> Result<String> {
+        value_string(self.attribute("key").await?, "key")
+    }
+
+    pub async fn type_name(&self) -> Result<String> {
+        value_string(self.attribute("type").await?, "type")
+    }
+
+    pub async fn text(&self) -> Result<String> {
+        value_string(self.attribute("text").await?, "text")
+    }
+
+    pub async fn description(&self) -> Result<String> {
+        value_string(self.attribute("description").await?, "description")
+    }
+
+    pub async fn hint(&self) -> Result<String> {
+        value_string(self.attribute("hint").await?, "hint")
+    }
+
+    pub async fn is_selected(&self) -> Result<bool> {
+        value_bool(self.attribute("selected").await?, "selected")
+    }
+
+    pub async fn is_checked(&self) -> Result<bool> {
+        value_bool(self.attribute("checked").await?, "checked")
+    }
+
+    pub async fn is_enabled(&self) -> Result<bool> {
+        value_bool(self.attribute("enabled").await?, "enabled")
+    }
+
+    pub async fn is_focused(&self) -> Result<bool> {
+        value_bool(self.attribute("focused").await?, "focused")
+    }
+
+    pub async fn is_checkable(&self) -> Result<bool> {
+        value_bool(self.attribute("checkable").await?, "checkable")
+    }
+
+    pub async fn is_clickable(&self) -> Result<bool> {
+        value_bool(self.attribute("clickable").await?, "clickable")
+    }
+
+    pub async fn is_long_clickable(&self) -> Result<bool> {
+        value_bool(self.attribute("longClickable").await?, "longClickable")
+    }
+
+    pub async fn is_scrollable(&self) -> Result<bool> {
+        value_bool(self.attribute("scrollable").await?, "scrollable")
+    }
+
     pub async fn bounds(&self) -> Result<Bounds> {
         let value = self.operate("getBounds", json!([])).await?;
         parse_bounds_value(&value)
             .ok_or_else(|| DriverError::Protocol("控件 bounds 格式无效".into()))
+    }
+
+    pub async fn bounds_center(&self) -> Result<crate::Point> {
+        Ok(self.bounds().await?.center())
+    }
+
+    pub async fn info(&self) -> Result<ElementInfo> {
+        let id = self.id().await?;
+        let key = self.key().await?;
+        let type_name = self.type_name().await?;
+        let text = self.text().await?;
+        let description = self.description().await?;
+        let hint = self.hint().await?;
+        let selected = self.is_selected().await?;
+        let checked = self.is_checked().await?;
+        let enabled = self.is_enabled().await?;
+        let focused = self.is_focused().await?;
+        let checkable = self.is_checkable().await?;
+        let clickable = self.is_clickable().await?;
+        let long_clickable = self.is_long_clickable().await?;
+        let scrollable = self.is_scrollable().await?;
+        let bounds = self.bounds().await?;
+        Ok(ElementInfo {
+            id,
+            key,
+            type_name,
+            text,
+            description,
+            hint,
+            selected,
+            checked,
+            enabled,
+            focused,
+            checkable,
+            clickable,
+            long_clickable,
+            scrollable,
+            bounds,
+            bounds_center: bounds.center(),
+        })
     }
 
     pub async fn click(&self) -> Result<()> {
@@ -358,6 +475,19 @@ fn validate_scale(scale: f64) -> Result<()> {
     } else {
         Err(DriverError::InvalidCoordinate("缩放比例必须大于 0".into()))
     }
+}
+
+fn value_string(value: Value, name: &str) -> Result<String> {
+    value
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| DriverError::Protocol(format!("控件属性 {name} 不是字符串")))
+}
+
+fn value_bool(value: Value, name: &str) -> Result<bool> {
+    value
+        .as_bool()
+        .ok_or_else(|| DriverError::Protocol(format!("控件属性 {name} 不是布尔值")))
 }
 
 #[cfg(test)]

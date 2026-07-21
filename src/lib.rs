@@ -6,7 +6,9 @@ mod agent;
 mod catalog;
 mod driver;
 mod error;
+mod gesture;
 mod hdc;
+mod keycode;
 mod rpc;
 mod selector;
 mod types;
@@ -19,11 +21,14 @@ pub mod blocking;
 pub use agent::{AgentProfile, AgentSource, CompatibilityStatus, HarmonyTransport};
 pub use driver::{HmDriver, HmDriverBuilder};
 pub use error::{DriverError, Result};
+pub use gesture::{Gesture, GesturePath};
 pub use hdc::{CommandOutput, HdcConfig};
-pub use selector::{Element, MatchPattern, Selector};
+pub use keycode::KeyCode;
+pub use selector::{Element, ElementInfo, MatchPattern, Selector};
 pub use types::{
-    AppIdentifier, Bounds, DeviceDescriptor, DeviceInfo, DeviceSelector, DeviceSerial,
-    DeviceStatus, DisplayRotation, DisplaySize, NormalizedPoint, Point, Position,
+    AbilityInfo, AppIdentifier, Bounds, DeviceDescriptor, DeviceInfo, DeviceSelector, DeviceSerial,
+    DeviceStatus, DisplayRotation, DisplaySize, ForwardEndpoint, ForwardEntry, NormalizedPoint,
+    OpenUrlMode, Point, Position, ScreenState, ScreenshotMethod, SwipeArea, SwipeDirection,
 };
 pub use ui::UiNode;
 pub use xpath::XPathElement;

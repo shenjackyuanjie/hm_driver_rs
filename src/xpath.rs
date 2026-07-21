@@ -86,16 +86,24 @@ impl XPathElement {
         self.bounds
     }
 
+    pub fn center(&self) -> Option<crate::Point> {
+        self.bounds.map(Bounds::center)
+    }
+
+    pub fn text(&self) -> Option<&str> {
+        self.attribute("text")
+    }
+
     pub async fn click(&self) -> Result<()> {
-        self.driver.click(self.center()?).await
+        self.driver.click(self.required_center()?).await
     }
 
     pub async fn double_click(&self) -> Result<()> {
-        self.driver.double_click(self.center()?).await
+        self.driver.double_click(self.required_center()?).await
     }
 
     pub async fn long_click(&self) -> Result<()> {
-        self.driver.long_click(self.center()?).await
+        self.driver.long_click(self.required_center()?).await
     }
 
     pub async fn input_text(&self, text: &str) -> Result<()> {
@@ -103,7 +111,7 @@ impl XPathElement {
         self.driver.input_text(text).await
     }
 
-    fn center(&self) -> Result<crate::Point> {
+    fn required_center(&self) -> Result<crate::Point> {
         self.bounds
             .map(Bounds::center)
             .ok_or(DriverError::XPathNotFound)

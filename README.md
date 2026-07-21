@@ -12,7 +12,6 @@ use hm_driver_rs::{AgentSource, DeviceSelector, HmDriver, Selector};
 async fn main() -> hm_driver_rs::Result<()> {
     let driver = HmDriver::builder()
         .device(DeviceSelector::Auto)
-        .hdc_path("D:/command-line-tools/hdc.exe")
         .agent_source(AgentSource::Embedded)
         .connect()
         .await?;
@@ -28,6 +27,55 @@ async fn main() -> hm_driver_rs::Result<()> {
 阻塞代码使用 `hm_driver_rs::blocking::HmDriver`。阻塞门面共享进程级 Tokio runtime，
 若在 Tokio 异步上下文中误用会返回 `BlockingInAsyncContext`，不会触发嵌套 runtime
 panic。
+
+## 新增设备与交互能力
+
+坐标 API 使用 `Position` 明确区分绝对坐标与归一化坐标。归一化坐标范围为 `0.0` 到
+`1.0`，并始终换算到屏幕内的有效像素。点击、双击、长按、滑动、方向滑动和自定义
+手势均支持归一化坐标。
+
+```rust,no_run
+use hm_driver_rs::{Gesture, GesturePath, NormalizedPoint, Position, SwipeArea, SwipeDirection};
+use std::time::Duration;
+
+# async fn example(driver: &hm_driver_rs::HmDriver) -> hm_driver_rs::Result<()> {
+driver.click_position(Position::normalized(0.5, 0.5)?).await?;
+driver
+    .swipe_direction(SwipeDirection::Up, SwipeArea::FullScreen, 0.8, 2_000)
+    .await?;
+
+let left = GesturePath::new(
+    Position::Normalized(NormalizedPoint::new(0.4, 0.5)?),
+    Duration::from_millis(100),
+)?
+.move_to(Position::normalized(0.2, 0.5)?, Duration::from_millis(300))?;
+let right = GesturePath::new(
+    Position::normalized(0.6, 0.5)?,
+    Duration::from_millis(100),
+)?
+.move_to(Position::normalized(0.8, 0.5)?, Duration::from_millis(300))?;
+driver.perform_gesture(&Gesture::new(left).add_path(right)?).await?;
+# Ok(())
+# }
+```
+
+`KeyCode` 包含 hmdriver2 参考中的完整 OpenHarmony 按键码，可通过
+`press_key_code()` 发送；未类型化的平台扩展码仍可使用 `press_key(u32)`。设备信息另外提供
+`screen_state()` 和 `wlan_ip()`，`list_forwards()` 返回已解析的 HDC forward 端点。
+
+## 应用、截图与控件
+
+`app_info()` 返回 `bm dump` 原始 JSON，`app_abilities()` 返回所有模块的 Ability，
+`main_ability_info()` 按 launcher、模块主 Ability 和主模块选择入口。Ability 解析兼容根级
+以及外层结果对象，且每项保留原始 JSON。`open_url()` 可选择系统浏览器或默认路由。
+
+截图可显式选择 `ScreenshotMethod::SnapshotDisplay` 或 `ScreenshotMethod::ScreenCap`；
+`ScreenshotMethod::Auto` 保持优先使用 `snapshot_display`、失败后回退的行为。
+
+`HmDriver` 提供 `exists()`、`count()` 和 `click_if_exists()`。`Element` 提供 `id()`、
+`key()`、`type_name()`、`text()`、`description()`、`hint()`、全部布尔状态、
+`bounds_center()`、`info()` 和 `wait_until_gone()` 等便利方法。XPath 查询提供可选查询、
+条件点击、文本、中心坐标和完整属性快照。
 
 ## HDC 与设备选择
 
@@ -64,9 +112,9 @@ Selector 重新定位。
 
 ## 当前范围
 
-首版包含设备与应用基础操作、文件传输、截图、UI 树、Selector、控件交互和 XPath
-1.0。暂不包含录屏/Captures 流、Toast watcher、复杂多指轨迹、OCR、Inspector、调度器、
-持久化、Android、iOS 或 Windows Service。
+首版包含设备与应用基础操作、文件传输、截图、UI 树、Selector、控件交互、XPath 1.0
+和最多十指的自定义轨迹。暂不包含录屏/Captures 流、Toast watcher、OCR、Inspector、
+调度器、持久化、Android、iOS 或 Windows Service。
 
 ## 许可注意事项
 

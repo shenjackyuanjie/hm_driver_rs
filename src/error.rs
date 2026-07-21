@@ -57,8 +57,12 @@ pub enum DriverError {
     Io(#[from] std::io::Error),
     #[error("应用或 Ability 标识不合法：{0}")]
     InvalidIdentifier(String),
+    #[error("URL 不合法：{0}")]
+    InvalidUrl(String),
     #[error("坐标不合法：{0}")]
     InvalidCoordinate(String),
+    #[error("手势不合法：{0}")]
+    InvalidGesture(String),
     #[error("未找到控件")]
     ElementNotFound,
     #[error("XPath 表达式无效：{0}")]

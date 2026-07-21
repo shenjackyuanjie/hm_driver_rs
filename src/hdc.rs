@@ -1,4 +1,6 @@
-use crate::types::{DeviceDescriptor, DeviceSelector, DeviceSerial, DeviceStatus};
+use crate::types::{
+    DeviceDescriptor, DeviceSelector, DeviceSerial, DeviceStatus, ForwardEndpoint, ForwardEntry,
+};
 use crate::{DriverError, Result};
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -213,6 +215,13 @@ impl HdcRunner {
         .map(|_| ())
     }
 
+    pub async fn list_forwards(&self) -> Result<Vec<ForwardEntry>> {
+        let output = self
+            .run(["fport", "ls"], self.inner.config.command_timeout)
+            .await?;
+        parse_forwards(&output.stdout)
+    }
+
     async fn run<I, S>(&self, arguments: I, duration: Duration) -> Result<CommandOutput>
     where
         I: IntoIterator<Item = S>,
@@ -364,6 +373,44 @@ pub(crate) fn parse_devices(output: &str) -> Result<Vec<DeviceDescriptor>> {
     Ok(devices)
 }
 
+pub(crate) fn parse_forwards(output: &str) -> Result<Vec<ForwardEntry>> {
+    let endpoint =
+        regex::Regex::new(r"^(?:tcp|localabstract|localreserved|localfilesystem|dev|jdwp):\S+$")
+            .map_err(|error| DriverError::Protocol(error.to_string()))?;
+    let mut result = Vec::new();
+    for line in output.lines() {
+        let endpoints: Vec<_> = line
+            .split_whitespace()
+            .filter(|value| endpoint.is_match(value))
+            .collect();
+        if endpoints.len() >= 2 {
+            result.push(ForwardEntry {
+                local: parse_forward_endpoint(endpoints[0])?,
+                remote: parse_forward_endpoint(endpoints[1])?,
+            });
+        }
+    }
+    Ok(result)
+}
+
+fn parse_forward_endpoint(value: &str) -> Result<ForwardEndpoint> {
+    if let Some(port) = value.strip_prefix("tcp:") {
+        return port
+            .parse::<u16>()
+            .map(ForwardEndpoint::Tcp)
+            .map_err(|_| DriverError::Protocol("HDC forward TCP 端口无效".into()));
+    }
+    if let Some(name) = value.strip_prefix("localabstract:") {
+        if name.is_empty() {
+            return Err(DriverError::Protocol(
+                "HDC forward localabstract 名称为空".into(),
+            ));
+        }
+        return Ok(ForwardEndpoint::LocalAbstract(name.to_owned()));
+    }
+    Ok(ForwardEndpoint::Other(value.to_owned()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -380,5 +427,24 @@ mod tests {
     #[test]
     fn empty_output_has_no_devices() {
         assert!(parse_devices("[Empty]\n").unwrap().is_empty());
+    }
+
+    #[test]
+    fn parses_tcp_and_local_abstract_forwards() {
+        let forwards = parse_forwards(
+            "tcp:10001 tcp:8012\n<redacted> tcp:10002 localabstract:uitest_socket\n<redacted> tcp:10003 localfilesystem:/data/service.sock [Forward]\n",
+        )
+        .unwrap();
+        assert_eq!(forwards.len(), 3);
+        assert_eq!(forwards[0].local, ForwardEndpoint::Tcp(10001));
+        assert_eq!(forwards[0].remote, ForwardEndpoint::Tcp(8012));
+        assert_eq!(
+            forwards[1].remote,
+            ForwardEndpoint::LocalAbstract("uitest_socket".into())
+        );
+        assert_eq!(
+            forwards[2].remote,
+            ForwardEndpoint::Other("localfilesystem:/data/service.sock".into())
+        );
     }
 }

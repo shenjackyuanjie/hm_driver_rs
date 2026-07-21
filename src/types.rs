@@ -2,6 +2,7 @@ use crate::{DriverError, Result};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::net::IpAddr;
 
 /// 设备序列号。格式化和调试输出始终脱敏。
 #[derive(Clone)]
@@ -96,6 +97,26 @@ impl NormalizedPoint {
             ))
         }
     }
+
+    /// 按显示区域换算为有效的绝对像素坐标。
+    pub fn resolve(self, display: DisplaySize) -> Result<Point> {
+        let max_x = display
+            .width
+            .checked_sub(1)
+            .ok_or_else(|| DriverError::InvalidCoordinate("显示宽度不能为 0".into()))?;
+        let max_y = display
+            .height
+            .checked_sub(1)
+            .ok_or_else(|| DriverError::InvalidCoordinate("显示高度不能为 0".into()))?;
+        let max_x = i32::try_from(max_x)
+            .map_err(|_| DriverError::InvalidCoordinate("显示宽度超出范围".into()))?;
+        let max_y = i32::try_from(max_y)
+            .map_err(|_| DriverError::InvalidCoordinate("显示高度超出范围".into()))?;
+        Ok(Point::new(
+            (self.x * f64::from(max_x)).round() as i32,
+            (self.y * f64::from(max_y)).round() as i32,
+        ))
+    }
 }
 
 /// 可接受绝对或归一化坐标的位置。
@@ -103,6 +124,36 @@ impl NormalizedPoint {
 pub enum Position {
     Absolute(Point),
     Normalized(NormalizedPoint),
+}
+
+impl Position {
+    pub const fn absolute(x: i32, y: i32) -> Self {
+        Self::Absolute(Point::new(x, y))
+    }
+
+    pub fn normalized(x: f64, y: f64) -> Result<Self> {
+        NormalizedPoint::new(x, y).map(Self::Normalized)
+    }
+
+    /// 按显示区域解析绝对或归一化坐标。
+    pub fn resolve(self, display: DisplaySize) -> Result<Point> {
+        match self {
+            Self::Absolute(point) => Ok(point),
+            Self::Normalized(point) => point.resolve(display),
+        }
+    }
+}
+
+impl From<Point> for Position {
+    fn from(value: Point) -> Self {
+        Self::Absolute(value)
+    }
+}
+
+impl From<NormalizedPoint> for Position {
+    fn from(value: NormalizedPoint) -> Self {
+        Self::Normalized(value)
+    }
 }
 
 /// 控件边界。
@@ -121,6 +172,14 @@ impl Bounds {
 
     pub const fn is_valid(self) -> bool {
         self.right >= self.left && self.bottom >= self.top
+    }
+
+    pub const fn width(self) -> i32 {
+        self.right - self.left
+    }
+
+    pub const fn height(self) -> i32 {
+        self.bottom - self.top
     }
 }
 
@@ -164,8 +223,135 @@ pub struct DeviceInfo {
     pub api_version: Option<u32>,
     pub system_version: String,
     pub cpu_abi: String,
+    pub wlan_ip: Option<IpAddr>,
     pub display_size: DisplaySize,
     pub display_rotation: DisplayRotation,
+}
+
+/// 设备当前屏幕电源状态。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ScreenState {
+    Inactive,
+    Sleep,
+    Awake,
+    Unknown(String),
+}
+
+/// 打开 URL 时使用的目标。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OpenUrlMode {
+    /// 通过系统浏览器打开。
+    #[default]
+    SystemBrowser,
+    /// 使用系统默认的 URL 路由规则。
+    Default,
+}
+
+/// 截图命令选择。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ScreenshotMethod {
+    /// 优先使用 snapshot_display，失败时回退到 UITest screenCap。
+    #[default]
+    Auto,
+    SnapshotDisplay,
+    ScreenCap,
+}
+
+/// HDC forward 的端点。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ForwardEndpoint {
+    Tcp(u16),
+    LocalAbstract(String),
+    Other(String),
+}
+
+/// 一条 HDC forward 映射。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ForwardEntry {
+    pub local: ForwardEndpoint,
+    pub remote: ForwardEndpoint,
+}
+
+/// 页面滑动方向。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SwipeDirection {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+/// 方向滑动使用的屏幕区域。
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum SwipeArea {
+    #[default]
+    FullScreen,
+    Absolute(Bounds),
+    Normalized {
+        top_left: NormalizedPoint,
+        bottom_right: NormalizedPoint,
+    },
+}
+
+impl SwipeArea {
+    pub fn normalized(left: f64, top: f64, right: f64, bottom: f64) -> Result<Self> {
+        let top_left = NormalizedPoint::new(left, top)?;
+        let bottom_right = NormalizedPoint::new(right, bottom)?;
+        if right <= left || bottom <= top {
+            return Err(DriverError::InvalidCoordinate(
+                "归一化滑动区域必须具有正宽度和正高度".into(),
+            ));
+        }
+        Ok(Self::Normalized {
+            top_left,
+            bottom_right,
+        })
+    }
+
+    pub(crate) fn resolve(self, display: DisplaySize) -> Result<Bounds> {
+        let width = i32::try_from(display.width)
+            .map_err(|_| DriverError::InvalidCoordinate("显示宽度超出范围".into()))?;
+        let height = i32::try_from(display.height)
+            .map_err(|_| DriverError::InvalidCoordinate("显示高度超出范围".into()))?;
+        let bounds = match self {
+            Self::FullScreen => Bounds {
+                left: 0,
+                top: 0,
+                right: width.saturating_sub(1),
+                bottom: height.saturating_sub(1),
+            },
+            Self::Absolute(bounds) => bounds,
+            Self::Normalized {
+                top_left,
+                bottom_right,
+            } => {
+                let top_left = top_left.resolve(display)?;
+                let bottom_right = bottom_right.resolve(display)?;
+                Bounds {
+                    left: top_left.x,
+                    top: top_left.y,
+                    right: bottom_right.x,
+                    bottom: bottom_right.y,
+                }
+            }
+        };
+        if !bounds.is_valid() || bounds.width() <= 0 || bounds.height() <= 0 {
+            return Err(DriverError::InvalidCoordinate("滑动区域无效".into()));
+        }
+        Ok(bounds)
+    }
+}
+
+/// 从 bundle 元数据中解析出的 Ability。
+#[derive(Clone, Debug, PartialEq)]
+pub struct AbilityInfo {
+    pub name: String,
+    pub module_name: String,
+    pub module_main_ability: Option<String>,
+    pub main_module: Option<String>,
+    pub is_launcher: bool,
+    /// `bm dump` 中对应 Ability 的原始对象，保留平台扩展字段。
+    pub raw: serde_json::Value,
 }
 
 /// 已校验的 HarmonyOS bundle 标识。
@@ -224,5 +410,47 @@ mod tests {
         assert!(AppIdentifier::new("com.example.demo").is_ok());
         assert!(AppIdentifier::new("com.example;rm").is_err());
         assert!(AppIdentifier::new("1com.example").is_err());
+    }
+
+    #[test]
+    fn resolves_normalized_swipe_area() {
+        let area = SwipeArea::normalized(0.1, 0.2, 0.9, 0.8).unwrap();
+        assert_eq!(
+            area.resolve(DisplaySize {
+                width: 1000,
+                height: 2000,
+            })
+            .unwrap(),
+            Bounds {
+                left: 100,
+                top: 400,
+                right: 899,
+                bottom: 1599,
+            }
+        );
+    }
+
+    #[test]
+    fn normalized_position_stays_inside_display() {
+        let display = DisplaySize {
+            width: 1000,
+            height: 2000,
+        };
+        assert_eq!(
+            Position::normalized(1.0, 1.0)
+                .unwrap()
+                .resolve(display)
+                .unwrap(),
+            Point::new(999, 1999)
+        );
+        assert!(
+            NormalizedPoint::new(0.5, 0.5)
+                .unwrap()
+                .resolve(DisplaySize {
+                    width: 0,
+                    height: 2000,
+                })
+                .is_err()
+        );
     }
 }
