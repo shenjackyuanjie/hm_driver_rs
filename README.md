@@ -1,5 +1,11 @@
 # hm_driver_rs
 
+## 致谢
+
+感谢 [hmdriver2](https://github.com/codematrixer/hmdriver2) 原始项目提供思路与参考。
+
+感谢华为 [DevEco Testing Hypium](https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/hypium-python-guidelines) 提供 `agent.so` 及整体方案。
+
 `hm_driver_rs` 是原生 Rust HarmonyOS UI 自动化驱动。它通过 HDC 启动官方 UITest
 Agent，并以 Hypium JSON RPC 提供异步 API 和可选的阻塞门面。
 
