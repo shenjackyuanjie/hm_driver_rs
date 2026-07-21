@@ -304,9 +304,8 @@ fn server_from_environment() -> Result<Option<(String, u16)>> {
                 .map_err(|_| DriverError::InvalidIdentifier("HDC server 端口".into()))?;
             validate_server((host, port)).map(Some)
         }
-        _ => Err(DriverError::InvalidIdentifier(
-            "HDC_SERVER_HOST 和 HDC_SERVER_PORT 必须同时设置".into(),
-        )),
+        // HDC CLI 支持只设置其中一个变量，此时保留环境并由 CLI 自行解释。
+        _ => Ok(None),
     }
 }
 
