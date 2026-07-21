@@ -171,6 +171,38 @@ async fn selector_wait_cancels_a_slow_rpc_at_its_total_deadline() {
     assert!(started.elapsed() < Duration::from_millis(150));
 }
 
+#[tokio::test]
+async fn invalid_component_arrays_queue_references_already_returned() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let (reader, mut writer) = stream.into_split();
+        let mut lines = BufReader::new(reader).lines();
+        let request: serde_json::Value =
+            serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+        let response = json!({
+            "request_id": request["request_id"],
+            "result": ["Component#1", 7],
+            "exception": null
+        });
+        writer
+            .write_all(serde_json::to_string(&response).unwrap().as_bytes())
+            .await
+            .unwrap();
+        writer.write_all(b"\n").await.unwrap();
+    });
+    let rpc = RpcClient::connect(port, Duration::from_secs(1), Duration::from_secs(1), 1024)
+        .await
+        .unwrap();
+    let driver = HmDriver::with_test_rpc(rpc, ApiDialect::Modern);
+    assert!(matches!(
+        driver.find_remote_references(&crate::Selector::new()).await,
+        Err(DriverError::Protocol(_))
+    ));
+    assert_eq!(driver.queued_reference_count(), 1);
+}
+
 #[test]
 fn quotes_device_shell_url_as_one_argument() {
     assert_eq!(

@@ -463,6 +463,36 @@ impl HmDriver {
         .await
     }
 
+    async fn driver_call_with_timeout(
+        &self,
+        method: &str,
+        args: Value,
+        timeout: Duration,
+    ) -> Result<Value> {
+        self.flush_cleaner(false).await?;
+        let (rpc, dialect, reference) = {
+            let state = self.inner.state.lock().await;
+            if state.closed {
+                return Err(DriverError::DriverClosed);
+            }
+            (
+                state.rpc.clone().ok_or(DriverError::SessionInvalid)?,
+                state.dialect.ok_or(DriverError::SessionInvalid)?,
+                state
+                    .driver_reference
+                    .clone()
+                    .ok_or(DriverError::SessionInvalid)?,
+            )
+        };
+        rpc.call_with_timeout(
+            &format!("{}.{}", dialect.driver(), method),
+            Some(&reference),
+            args,
+            timeout,
+        )
+        .await
+    }
+
     async fn absolute_position(
         &self,
         position: crate::types::Position,

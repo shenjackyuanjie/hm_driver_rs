@@ -225,9 +225,16 @@ impl HmDriver {
     pub async fn wait_for_idle(&self, idle_time: Duration, timeout: Duration) -> Result<()> {
         let idle_millis = duration_millis(idle_time, "UI 空闲时长")?;
         let timeout_millis = duration_millis(timeout, "UI 空闲等待超时")?;
-        self.driver_call("waitForIdle", json!([idle_millis, timeout_millis]))
-            .await
-            .map(|_| ())
+        let rpc_timeout = timeout
+            .checked_add(Duration::from_secs(1))
+            .ok_or_else(|| DriverError::InvalidArgument("UI 空闲等待超时过大".into()))?;
+        self.driver_call_with_timeout(
+            "waitForIdle",
+            json!([idle_millis, timeout_millis]),
+            rpc_timeout,
+        )
+        .await
+        .map(|_| ())
     }
 }
 

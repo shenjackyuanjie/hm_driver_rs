@@ -224,14 +224,22 @@ impl HmDriver {
         match result {
             Value::Null => Ok(Vec::new()),
             Value::String(reference) => Ok(vec![reference]),
-            Value::Array(values) => values
-                .into_iter()
-                .map(|value| {
-                    value.as_str().map(str::to_owned).ok_or_else(|| {
-                        DriverError::Protocol("findComponents 返回了非引用值".into())
-                    })
-                })
-                .collect(),
+            Value::Array(values) => {
+                let mut references = Vec::with_capacity(values.len());
+                for value in values {
+                    let Some(reference) = value.as_str() else {
+                        let generation = self.generation();
+                        for reference in references {
+                            self.queue_remote_reference(reference, generation);
+                        }
+                        return Err(DriverError::Protocol(
+                            "findComponents 返回了非引用值".into(),
+                        ));
+                    };
+                    references.push(reference.to_owned());
+                }
+                Ok(references)
+            }
             _ => Err(DriverError::Protocol("findComponents 响应类型无效".into())),
         }
     }

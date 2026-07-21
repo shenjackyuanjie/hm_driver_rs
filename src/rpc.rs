@@ -131,6 +131,17 @@ impl RpcClient {
     }
 
     pub async fn call(&self, api: &str, this: Option<&str>, args: Value) -> Result<Value> {
+        self.call_with_timeout(api, this, args, self.inner.timeout)
+            .await
+    }
+
+    pub async fn call_with_timeout(
+        &self,
+        api: &str,
+        this: Option<&str>,
+        args: Value,
+        request_timeout: Duration,
+    ) -> Result<Value> {
         if !self.is_valid() {
             return Err(DriverError::SessionInvalid);
         }
@@ -155,7 +166,6 @@ impl RpcClient {
         });
         let mut bytes = serde_json::to_vec(&request)?;
         bytes.push(b'\n');
-        let request_timeout = self.inner.timeout;
         let mut connection = self.inner.connection.lock().await;
         // Dropping an in-flight call after it may have written a request leaves the stream
         // response boundary unknown, especially for Agents which omit request_id.
@@ -380,6 +390,31 @@ mod tests {
             client.call("x", None, json!([])).await,
             Err(DriverError::RpcTimeout { .. })
         ));
+        assert!(!client.is_valid());
+    }
+
+    #[tokio::test]
+    async fn supports_a_per_call_timeout() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 256];
+            let _ = stream.read(&mut request).await;
+            std::future::pending::<()>().await;
+        });
+        let client =
+            RpcClient::connect(port, Duration::from_secs(1), Duration::from_secs(30), 1024)
+                .await
+                .unwrap();
+        let started = tokio::time::Instant::now();
+        assert!(matches!(
+            client
+                .call_with_timeout("x", None, json!([]), Duration::from_millis(20))
+                .await,
+            Err(DriverError::RpcTimeout { .. })
+        ));
+        assert!(started.elapsed() < Duration::from_millis(150));
         assert!(!client.is_valid());
     }
 
