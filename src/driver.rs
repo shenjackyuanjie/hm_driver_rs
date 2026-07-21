@@ -114,7 +114,7 @@ impl HmDriverBuilder {
                     rpc: Some(session.rpc),
                     dialect: Some(session.dialect),
                     driver_reference: Some(session.driver_reference),
-                    local_port: Some(session.local_port),
+                    owned_forwards: session.owned_forwards,
                     generation: 1,
                     closed: false,
                     api_level: probe.api_level,
@@ -155,7 +155,7 @@ struct SessionState {
     rpc: Option<RpcClient>,
     dialect: Option<ApiDialect>,
     driver_reference: Option<String>,
-    local_port: Option<u16>,
+    owned_forwards: Vec<OwnedForward>,
     generation: u64,
     closed: bool,
     api_level: Option<u32>,
@@ -170,7 +170,18 @@ struct EstablishedSession {
     rpc: RpcClient,
     dialect: ApiDialect,
     driver_reference: String,
+    owned_forwards: Vec<OwnedForward>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct OwnedForward {
     local_port: u16,
+    remote: String,
+}
+
+struct ForwardCleanupIssue {
+    forward: OwnedForward,
+    error: DriverError,
 }
 
 struct DeviceProbe {
@@ -244,9 +255,12 @@ impl HmDriver {
         if let Some(rpc) = state.rpc.take() {
             rpc.invalidate();
         }
-        if let Some(port) = state.local_port.take() {
-            let remote = transport_endpoint(&self.inner.profile.transport);
-            let _ = self.inner.hdc.remove_forward(port, &remote).await;
+        state.dialect = None;
+        state.driver_reference = None;
+        let cleanup_issues =
+            cleanup_owned_forwards(&self.inner.hdc, &mut state.owned_forwards).await;
+        if !cleanup_issues.is_empty() {
+            return Err(forward_cleanup_error(cleanup_issues));
         }
         self.inner.cleaner.lock().expect("清理队列锁中毒").clear();
         let path = materialize_agent(&self.inner.source, &self.inner.profile).await?;
@@ -261,7 +275,7 @@ impl HmDriver {
         state.rpc = Some(session.rpc);
         state.dialect = Some(session.dialect);
         state.driver_reference = Some(session.driver_reference);
-        state.local_port = Some(session.local_port);
+        state.owned_forwards = session.owned_forwards;
         state.generation = state.generation.saturating_add(1);
         self.inner
             .generation
@@ -278,9 +292,12 @@ impl HmDriver {
         if let Some(rpc) = state.rpc.take() {
             rpc.invalidate();
         }
-        if let Some(port) = state.local_port.take() {
-            let remote = transport_endpoint(&self.inner.profile.transport);
-            let _ = self.inner.hdc.remove_forward(port, &remote).await;
+        state.dialect = None;
+        state.driver_reference = None;
+        let cleanup_issues =
+            cleanup_owned_forwards(&self.inner.hdc, &mut state.owned_forwards).await;
+        if !cleanup_issues.is_empty() {
+            return Err(forward_cleanup_error(cleanup_issues));
         }
         if self.inner.config.kill_daemon_on_close {
             stop_singleness_daemon(&self.inner.hdc).await?;
@@ -1041,7 +1058,7 @@ impl HmDriver {
                     rpc: Some(rpc),
                     dialect: Some(dialect),
                     driver_reference: Some(format!("{}#0", dialect.driver())),
-                    local_port: None,
+                    owned_forwards: Vec::new(),
                     generation: 1,
                     closed: false,
                     api_level: Some(9),
@@ -1211,6 +1228,7 @@ async fn establish_session(
 ) -> Result<EstablishedSession> {
     let remote = transport_endpoint(transport);
     let mut last_error = None;
+    let mut owned_forwards = Vec::new();
     for _ in 0..3 {
         let listener = TcpListener::bind(("127.0.0.1", 0))
             .await
@@ -1222,25 +1240,79 @@ async fn establish_session(
         drop(listener);
         if let Err(error) = hdc.forward(port, &remote).await {
             last_error = Some(error);
-            let _ = hdc.remove_forward(port, &remote).await;
             continue;
         }
+        owned_forwards.push(OwnedForward {
+            local_port: port,
+            remote: remote.clone(),
+        });
         match connect_and_create(port, config, api_level).await {
             Ok((rpc, dialect, driver_reference)) => {
                 return Ok(EstablishedSession {
                     rpc,
                     dialect,
                     driver_reference,
-                    local_port: port,
+                    owned_forwards,
                 });
             }
             Err(error) => {
+                let cleanup_issues = cleanup_owned_forwards(hdc, &mut owned_forwards).await;
+                if !cleanup_issues.is_empty() {
+                    return Err(forward_cleanup_after_operation(error, cleanup_issues));
+                }
                 last_error = Some(error);
-                let _ = hdc.remove_forward(port, &remote).await;
             }
         }
     }
     Err(last_error.unwrap_or_else(|| DriverError::Forward("重试次数耗尽".into())))
+}
+
+async fn cleanup_owned_forwards(
+    hdc: &HdcRunner,
+    owned_forwards: &mut Vec<OwnedForward>,
+) -> Vec<ForwardCleanupIssue> {
+    let mut retained = Vec::new();
+    let mut issues = Vec::new();
+    for forward in std::mem::take(owned_forwards) {
+        match hdc
+            .remove_forward(forward.local_port, &forward.remote)
+            .await
+        {
+            Ok(()) => {}
+            Err(error) => {
+                retained.push(forward.clone());
+                issues.push(ForwardCleanupIssue { forward, error });
+            }
+        }
+    }
+    *owned_forwards = retained;
+    issues
+}
+
+fn forward_cleanup_error(mut issues: Vec<ForwardCleanupIssue>) -> DriverError {
+    let additional_failures = issues.len().saturating_sub(1);
+    let issue = issues.swap_remove(0);
+    DriverError::ForwardCleanup {
+        local_port: issue.forward.local_port,
+        remote: issue.forward.remote,
+        additional_failures,
+        source: Box::new(issue.error),
+    }
+}
+
+fn forward_cleanup_after_operation(
+    operation: DriverError,
+    mut issues: Vec<ForwardCleanupIssue>,
+) -> DriverError {
+    let additional_failures = issues.len().saturating_sub(1);
+    let issue = issues.swap_remove(0);
+    DriverError::ForwardCleanupAfterOperation {
+        local_port: issue.forward.local_port,
+        remote: issue.forward.remote,
+        additional_failures,
+        operation: Box::new(operation),
+        cleanup: Box::new(issue.error),
+    }
 }
 
 fn transport_endpoint(transport: &HarmonyTransport) -> String {

@@ -202,6 +202,10 @@ impl HdcRunner {
     }
 
     pub async fn remove_forward(&self, local_port: u16, remote: &str) -> Result<()> {
+        let remote_endpoint = parse_forward_endpoint(remote)?;
+        if !self.forward_exists(local_port, &remote_endpoint).await? {
+            return Ok(());
+        }
         self.run(
             [
                 OsString::from("fport"),
@@ -211,8 +215,16 @@ impl HdcRunner {
             ],
             self.inner.config.command_timeout,
         )
-        .await
-        .map(|_| ())
+        .await?;
+        for _ in 0..3 {
+            if !self.forward_exists(local_port, &remote_endpoint).await? {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        Err(DriverError::Forward(format!(
+            "删除命令完成后映射 tcp:{local_port} -> {remote} 仍然存在"
+        )))
     }
 
     pub async fn list_forwards(&self) -> Result<Vec<ForwardEntry>> {
@@ -220,6 +232,12 @@ impl HdcRunner {
             .run(["fport", "ls"], self.inner.config.command_timeout)
             .await?;
         parse_forwards(&output.stdout)
+    }
+
+    async fn forward_exists(&self, local_port: u16, remote: &ForwardEndpoint) -> Result<bool> {
+        Ok(self.list_forwards().await?.iter().any(|entry| {
+            entry.local == ForwardEndpoint::Tcp(local_port) && entry.remote == *remote
+        }))
     }
 
     async fn run<I, S>(&self, arguments: I, duration: Duration) -> Result<CommandOutput>

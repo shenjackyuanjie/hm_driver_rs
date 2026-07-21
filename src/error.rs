@@ -39,6 +39,26 @@ pub enum DriverError {
     AgentStartup(String),
     #[error("无法建立 HDC 转发：{0}")]
     Forward(String),
+    #[error(
+        "清理 HDC forward tcp:{local_port} -> {remote} 失败：{source}（另有 {additional_failures} 条清理失败）"
+    )]
+    ForwardCleanup {
+        local_port: u16,
+        remote: String,
+        additional_failures: usize,
+        #[source]
+        source: Box<DriverError>,
+    },
+    #[error(
+        "操作失败：{operation}；随后清理 HDC forward tcp:{local_port} -> {remote} 也失败：{cleanup}（另有 {additional_failures} 条清理失败）"
+    )]
+    ForwardCleanupAfterOperation {
+        local_port: u16,
+        remote: String,
+        additional_failures: usize,
+        operation: Box<DriverError>,
+        cleanup: Box<DriverError>,
+    },
     #[error("RPC 连接失败：{0}")]
     RpcConnect(#[source] std::io::Error),
     #[error("RPC I/O 失败：{0}")]
