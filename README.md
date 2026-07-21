@@ -83,6 +83,36 @@ driver.perform_gesture(&Gesture::new(left).add_path(right)?).await?;
 `bounds_center()`、`info()` 和 `wait_until_gone()` 等便利方法。XPath 查询提供可选查询、
 条件点击、文本、中心坐标和完整属性快照。
 
+Selector 支持 `before()`、`after()`、`within()`、`in_window()` 和结果索引。可滚动控件
+支持滚动到顶部/底部，以及通过 `scroll_search()` 或带方向和边缘偏移的
+`scroll_search_with_options()` 查找子控件。Selector 链及未选中的控件引用会分批释放，
+避免长时间轮询耗尽 Agent 端对象。
+
+组合键、坐标拖拽、抛滑和 UI 空闲等待分别由 `press_key_combination()`、`drag()`、
+`fling()` 和 `wait_for_idle()` 提供。这些操作也都有对应的阻塞门面。
+
+## 等待条件
+
+`wait_for()` 和 `wait_until_gone()` 使用总截止时间，单次慢 RPC 不会突破调用方给出的
+超时。`wait_for_xpath()`、`wait_until_xpath_gone()`、`wait_for_app()` 和
+`Element::wait_for_attribute()` 覆盖常见状态等待；其他条件可使用 `wait_until()`，需要
+自定义轮询频率时使用 `wait_until_with_interval()`。
+
+```rust,no_run
+# use hm_driver_rs::{AppIdentifier, HmDriver, Result};
+# use std::time::Duration;
+# async fn example(driver: &HmDriver) -> Result<()> {
+let bundle = AppIdentifier::new("com.example.app")?;
+driver.wait_for_app(&bundle, Duration::from_secs(10)).await?;
+driver
+    .wait_until(Duration::from_secs(5), || async {
+        Ok(driver.current_app().await?.is_some())
+    })
+    .await?;
+# Ok(())
+# }
+```
+
 ## HDC 与设备选择
 
 HDC 路径按以下优先级解析，并在连接前固化为绝对路径：
@@ -115,6 +145,17 @@ Selector 重新定位。
 
 建议显式调用 `close()`。默认仅删除本次创建的 HDC forward 并保留 daemon；设置
 `DriverConfig::kill_daemon_on_close` 后才会停止精确匹配的 singleness daemon。
+如果最后一个 Driver/Element 句柄直接释放，驱动会尽力在后台清理远端引用、自有 forward
+和配置要求停止的 daemon；该兜底无法提供错误结果，也不替代确定性的 `close()`。
+
+RPC 调用被任务取消后会立即使会话失效，防止无 request ID 的迟到响应被下一次操作误收；
+之后应调用 `recover()`。截图、UI 树和 Agent 上传使用的设备端临时文件也具有取消清理
+守卫。
+
+## Cargo features
+
+默认启用 `blocking` 和 `embedded-agents`。关闭 `embedded-agents` 时不会引入缓存目录
+依赖，连接时应通过 `AgentSource::Directory` 指定官方 Agent 文件目录。
 
 ## 当前范围
 
