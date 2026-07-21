@@ -114,6 +114,7 @@ impl RpcClient {
             .next_id
             .fetch_add(1, Ordering::Relaxed)
             .to_string();
+        let request_id = format!("{request_id:0>20}");
         let request = json!({
             "module": MODULE,
             "method": METHOD,
@@ -124,6 +125,7 @@ impl RpcClient {
                 "message_type": "hypium"
             },
             "request_id": request_id,
+            "call": "xdevice",
             "client": "127.0.0.1"
         });
         let mut bytes = serde_json::to_vec(&request)?;
@@ -144,7 +146,9 @@ impl RpcClient {
             for _ in 0..32 {
                 let frame = read_frame(&mut connection, self.inner.max_frame_size).await?;
                 let response: RpcResponse = serde_json::from_slice(&frame)?;
-                if response.request_id != request_id {
+                // v1.2.2 的 bin Agent 响应不带 request_id。单连接只允许一个在途请求，
+                // 因此缺失 ID 时可安全归属于当前请求；存在 ID 时仍严格匹配。
+                if !response.request_id.is_empty() && response.request_id != request_id {
                     continue;
                 }
                 if !response.exception.is_null() {
@@ -226,6 +230,9 @@ mod tests {
             }
             let request: Value = serde_json::from_slice(&request).unwrap();
             let id = request["request_id"].as_str().unwrap();
+            assert_eq!(id.len(), 20);
+            assert!(id.chars().all(|ch| ch.is_ascii_digit()));
+            assert_eq!(request["call"], "xdevice");
             for mut chunk in chunks {
                 let marker = b"$ID$";
                 if let Some(position) = chunk.windows(marker.len()).position(|item| item == marker)
@@ -258,6 +265,19 @@ mod tests {
         assert_eq!(
             client.call("Driver.create", None, json!([])).await.unwrap(),
             json!({"ok": true})
+        );
+    }
+
+    #[tokio::test]
+    async fn accepts_bin_agent_response_without_request_id() {
+        let client = test_client(
+            vec![b"{\"result\":\"Driver#0\",\"pts\":1}\n".to_vec()],
+            1024,
+        )
+        .await;
+        assert_eq!(
+            client.call("Driver.create", None, json!([])).await.unwrap(),
+            json!("Driver#0")
         );
     }
 

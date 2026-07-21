@@ -199,12 +199,13 @@ impl HdcRunner {
         .map_err(|error| DriverError::Forward(error.to_string()))
     }
 
-    pub async fn remove_forward(&self, local_port: u16) -> Result<()> {
+    pub async fn remove_forward(&self, local_port: u16, remote: &str) -> Result<()> {
         self.run(
             [
                 OsString::from("fport"),
                 OsString::from("rm"),
                 OsString::from(format!("tcp:{local_port}")),
+                OsString::from(remote),
             ],
             self.inner.config.command_timeout,
         )

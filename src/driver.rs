@@ -241,7 +241,8 @@ impl HmDriver {
             rpc.invalidate();
         }
         if let Some(port) = state.local_port.take() {
-            let _ = self.inner.hdc.remove_forward(port).await;
+            let remote = transport_endpoint(&self.inner.profile.transport);
+            let _ = self.inner.hdc.remove_forward(port, &remote).await;
         }
         self.inner.cleaner.lock().expect("清理队列锁中毒").clear();
         let path = materialize_agent(&self.inner.source, &self.inner.profile).await?;
@@ -274,7 +275,8 @@ impl HmDriver {
             rpc.invalidate();
         }
         if let Some(port) = state.local_port.take() {
-            let _ = self.inner.hdc.remove_forward(port).await;
+            let remote = transport_endpoint(&self.inner.profile.transport);
+            let _ = self.inner.hdc.remove_forward(port, &remote).await;
         }
         if self.inner.config.kill_daemon_on_close {
             stop_singleness_daemon(&self.inner.hdc).await?;
@@ -690,7 +692,7 @@ impl HmDriver {
             return Ok(());
         }
         match self
-            .call_direct("BackendObjectsCleaner.clean", None, json!([references]))
+            .call_direct("BackendObjectsCleaner", None, json!(references))
             .await
         {
             Ok(_) => Ok(()),
@@ -949,10 +951,7 @@ async fn establish_session(
     config: &DriverConfig,
     api_level: Option<u32>,
 ) -> Result<EstablishedSession> {
-    let remote = match transport {
-        HarmonyTransport::Tcp { remote_port } => format!("tcp:{remote_port}"),
-        HarmonyTransport::LocalAbstract { socket_name } => format!("localabstract:{socket_name}"),
-    };
+    let remote = transport_endpoint(transport);
     let mut last_error = None;
     for _ in 0..3 {
         let listener = TcpListener::bind(("127.0.0.1", 0))
@@ -965,7 +964,7 @@ async fn establish_session(
         drop(listener);
         if let Err(error) = hdc.forward(port, &remote).await {
             last_error = Some(error);
-            let _ = hdc.remove_forward(port).await;
+            let _ = hdc.remove_forward(port, &remote).await;
             continue;
         }
         match connect_and_create(port, config, api_level).await {
@@ -979,11 +978,18 @@ async fn establish_session(
             }
             Err(error) => {
                 last_error = Some(error);
-                let _ = hdc.remove_forward(port).await;
+                let _ = hdc.remove_forward(port, &remote).await;
             }
         }
     }
     Err(last_error.unwrap_or_else(|| DriverError::Forward("重试次数耗尽".into())))
+}
+
+fn transport_endpoint(transport: &HarmonyTransport) -> String {
+    match transport {
+        HarmonyTransport::Tcp { remote_port } => format!("tcp:{remote_port}"),
+        HarmonyTransport::LocalAbstract { socket_name } => format!("localabstract:{socket_name}"),
+    }
 }
 
 async fn connect_and_create(
