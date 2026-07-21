@@ -250,6 +250,77 @@ impl Element {
         self.operate("clearText", json!([])).await.map(|_| ())
     }
 
+    /// 使用平台默认速度滚动到控件顶部。
+    pub async fn scroll_to_top(&self) -> Result<()> {
+        self.scroll_to_top_with_speed(600).await
+    }
+
+    pub async fn scroll_to_top_with_speed(&self, speed: u32) -> Result<()> {
+        validate_operation_speed(speed)?;
+        self.operate("scrollToTop", json!([speed]))
+            .await
+            .map(|_| ())
+    }
+
+    /// 使用平台默认速度滚动到控件底部。
+    pub async fn scroll_to_bottom(&self) -> Result<()> {
+        self.scroll_to_bottom_with_speed(600).await
+    }
+
+    pub async fn scroll_to_bottom_with_speed(&self, speed: u32) -> Result<()> {
+        validate_operation_speed(speed)?;
+        self.operate("scrollToBottom", json!([speed]))
+            .await
+            .map(|_| ())
+    }
+
+    /// 在当前可滚动控件中查找目标控件。
+    pub async fn scroll_search(&self, selector: &Selector) -> Result<Option<Element>> {
+        self.scroll_search_raw(selector, json!([])).await
+    }
+
+    /// 指定滚动方向及可选边缘偏移后查找目标控件。
+    pub async fn scroll_search_with_options(
+        &self,
+        selector: &Selector,
+        vertical: bool,
+        offset: Option<u32>,
+    ) -> Result<Option<Element>> {
+        let options = match offset {
+            Some(offset) => json!([vertical, offset]),
+            None => json!([vertical]),
+        };
+        self.scroll_search_raw(selector, options).await
+    }
+
+    async fn scroll_search_raw(
+        &self,
+        selector: &Selector,
+        options: Value,
+    ) -> Result<Option<Element>> {
+        let selector_reference = selector.build_remote(&self.driver).await?;
+        let mut args = vec![Value::String(selector_reference.clone())];
+        let Value::Array(options) = options else {
+            unreachable!("滚动搜索选项固定为数组")
+        };
+        args.extend(options);
+        let generation = self.driver.generation();
+        let result = self.operate("scrollSearch", Value::Array(args)).await;
+        self.driver
+            .queue_remote_reference(selector_reference, generation);
+        match result? {
+            Value::Null => Ok(None),
+            Value::String(reference) => Ok(Some(Element::new(
+                self.driver.clone(),
+                selector.clone(),
+                selector.selected_index(),
+                reference,
+                generation,
+            ))),
+            _ => Err(DriverError::Protocol("scrollSearch 未返回控件引用".into())),
+        }
+    }
+
     pub async fn drag_to(&self, target: &Element) -> Result<()> {
         let target = target.reference().await?;
         self.operate("dragTo", json!([target])).await.map(|_| ())
@@ -330,6 +401,16 @@ fn validate_scale(scale: f64) -> Result<()> {
         Ok(())
     } else {
         Err(DriverError::InvalidCoordinate("缩放比例必须大于 0".into()))
+    }
+}
+
+fn validate_operation_speed(speed: u32) -> Result<()> {
+    if (200..=40_000).contains(&speed) {
+        Ok(())
+    } else {
+        Err(DriverError::InvalidArgument(
+            "操作速度必须位于 200 到 40000".into(),
+        ))
     }
 }
 

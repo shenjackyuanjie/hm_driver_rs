@@ -245,3 +245,71 @@ async fn submits_pointer_matrix_before_injecting_gesture() {
     );
     assert_eq!(calls.last().unwrap(), "Driver.injectMultiPointerAction");
 }
+
+#[tokio::test]
+async fn submits_extended_input_methods_with_official_argument_shapes() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let calls = Arc::new(TokioMutex::new(Vec::new()));
+    let server_calls = calls.clone();
+    tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let (reader, mut writer) = stream.into_split();
+        let mut lines = BufReader::new(reader).lines();
+        for _ in 0..4 {
+            let request: serde_json::Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            server_calls.lock().await.push((
+                request["params"]["api"].as_str().unwrap().to_owned(),
+                request["params"]["args"].clone(),
+            ));
+            let response = json!({
+                "request_id": request["request_id"],
+                "result": null,
+                "exception": null
+            });
+            writer
+                .write_all(serde_json::to_string(&response).unwrap().as_bytes())
+                .await
+                .unwrap();
+            writer.write_all(b"\n").await.unwrap();
+        }
+    });
+    let rpc = RpcClient::connect(
+        port,
+        Duration::from_secs(1),
+        Duration::from_secs(1),
+        1024 * 1024,
+    )
+    .await
+    .unwrap();
+    let driver = HmDriver::with_test_rpc(rpc, ApiDialect::Modern);
+    driver
+        .press_key_combination(&[crate::KeyCode::CtrlLeft, crate::KeyCode::A])
+        .await
+        .unwrap();
+    driver
+        .drag(crate::Point::new(1, 2), crate::Point::new(3, 4), 600)
+        .await
+        .unwrap();
+    driver
+        .fling(crate::Point::new(5, 6), crate::Point::new(7, 8), 30, 2_000)
+        .await
+        .unwrap();
+    driver
+        .wait_for_idle(Duration::from_millis(100), Duration::from_secs(2))
+        .await
+        .unwrap();
+    assert_eq!(
+        *calls.lock().await,
+        vec![
+            ("Driver.triggerCombineKeys".into(), json!([2072, 2017])),
+            ("Driver.drag".into(), json!([1, 2, 3, 4, 600])),
+            (
+                "Driver.fling".into(),
+                json!([{"x": 5, "y": 6}, {"x": 7, "y": 8}, 30, 2000]),
+            ),
+            ("Driver.waitForIdle".into(), json!([100, 2000])),
+        ]
+    );
+}

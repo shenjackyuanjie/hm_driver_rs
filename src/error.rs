@@ -83,6 +83,8 @@ pub enum DriverError {
     InvalidCoordinate(String),
     #[error("手势不合法：{0}")]
     InvalidGesture(String),
+    #[error("参数不合法：{0}")]
+    InvalidArgument(String),
     #[error("未找到控件")]
     ElementNotFound,
     #[error("XPath 表达式无效：{0}")]

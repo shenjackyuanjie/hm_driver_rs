@@ -6,6 +6,7 @@ use crate::keycode::KeyCode;
 use crate::types::{Point, Position, SwipeArea, SwipeDirection};
 use crate::{DriverError, Result};
 use serde_json::json;
+use std::time::Duration;
 
 impl HmDriver {
     pub async fn press_key(&self, key_code: u32) -> Result<()> {
@@ -31,6 +32,19 @@ impl HmDriver {
 
     pub async fn press_key_code(&self, key_code: KeyCode) -> Result<()> {
         self.send_key_code(key_code.value()).await
+    }
+
+    /// 同时触发两个或三个组合键。
+    pub async fn press_key_combination(&self, key_codes: &[KeyCode]) -> Result<()> {
+        if !(2..=3).contains(&key_codes.len()) {
+            return Err(DriverError::InvalidArgument(
+                "组合键必须包含两个或三个按键".into(),
+            ));
+        }
+        let values: Vec<_> = key_codes.iter().map(|key| key.value()).collect();
+        self.driver_call("triggerCombineKeys", json!(values))
+            .await
+            .map(|_| ())
     }
 
     pub async fn go_back(&self) -> Result<()> {
@@ -83,6 +97,45 @@ impl HmDriver {
     pub async fn swipe_positions(&self, from: Position, to: Position, speed: u32) -> Result<()> {
         let size = self.display_size().await?;
         self.swipe(from.resolve(size)?, to.resolve(size)?, speed)
+            .await
+    }
+
+    /// 从一个绝对坐标拖拽到另一个绝对坐标。
+    pub async fn drag(&self, from: Point, to: Point, speed: u32) -> Result<()> {
+        validate_motion_speed(speed)?;
+        self.driver_call("drag", json!([from.x, from.y, to.x, to.y, speed]))
+            .await
+            .map(|_| ())
+    }
+
+    /// 接受绝对或归一化坐标的拖拽操作。
+    pub async fn drag_positions(&self, from: Position, to: Position, speed: u32) -> Result<()> {
+        let size = self.display_size().await?;
+        self.drag(from.resolve(size)?, to.resolve(size)?, speed)
+            .await
+    }
+
+    /// 执行带固定步长的抛滑操作。
+    pub async fn fling(&self, from: Point, to: Point, step_length: u32, speed: u32) -> Result<()> {
+        validate_motion_speed(speed)?;
+        if step_length == 0 {
+            return Err(DriverError::InvalidArgument("抛滑步长必须大于 0".into()));
+        }
+        self.driver_call("fling", json!([from, to, step_length, speed]))
+            .await
+            .map(|_| ())
+    }
+
+    /// 接受绝对或归一化坐标的抛滑操作。
+    pub async fn fling_positions(
+        &self,
+        from: Position,
+        to: Position,
+        step_length: u32,
+        speed: u32,
+    ) -> Result<()> {
+        let size = self.display_size().await?;
+        self.fling(from.resolve(size)?, to.resolve(size)?, step_length, speed)
             .await
     }
 
@@ -167,4 +220,31 @@ impl HmDriver {
         self.coordinate_call("inputText", json!([{"x": 1, "y": 1}, text]))
             .await
     }
+
+    /// 等待 UI 连续空闲指定时长，最长等待 `timeout`。
+    pub async fn wait_for_idle(&self, idle_time: Duration, timeout: Duration) -> Result<()> {
+        let idle_millis = duration_millis(idle_time, "UI 空闲时长")?;
+        let timeout_millis = duration_millis(timeout, "UI 空闲等待超时")?;
+        self.driver_call("waitForIdle", json!([idle_millis, timeout_millis]))
+            .await
+            .map(|_| ())
+    }
+}
+
+fn validate_motion_speed(speed: u32) -> Result<()> {
+    if (200..=40_000).contains(&speed) {
+        Ok(())
+    } else {
+        Err(DriverError::InvalidArgument(
+            "操作速度必须位于 200 到 40000".into(),
+        ))
+    }
+}
+
+fn duration_millis(duration: Duration, name: &str) -> Result<u32> {
+    if duration.is_zero() {
+        return Err(DriverError::InvalidArgument(format!("{name}必须大于 0")));
+    }
+    u32::try_from(duration.as_millis())
+        .map_err(|_| DriverError::InvalidArgument(format!("{name}超出 u32 毫秒范围")))
 }

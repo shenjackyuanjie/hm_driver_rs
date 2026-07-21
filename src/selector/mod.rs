@@ -54,6 +54,8 @@ enum SelectorCondition {
     },
     Before(Box<Selector>),
     After(Box<Selector>),
+    Within(Box<Selector>),
+    InWindow(String),
 }
 
 /// 可串联多个官方 On/By 条件的控件选择器。
@@ -136,6 +138,20 @@ impl Selector {
         self
     }
 
+    /// 限定目标控件位于另一个控件内部。
+    pub fn within(mut self, selector: Selector) -> Self {
+        self.conditions
+            .push(SelectorCondition::Within(Box::new(selector)));
+        self
+    }
+
+    /// 限定目标控件位于指定应用窗口。
+    pub fn in_window(mut self, bundle: &crate::AppIdentifier) -> Self {
+        self.conditions
+            .push(SelectorCondition::InWindow(bundle.as_str().to_owned()));
+        self
+    }
+
     pub fn index(mut self, index: usize) -> Self {
         self.index = index;
         self
@@ -172,6 +188,11 @@ impl Selector {
                     let other = Box::pin(selector.build_remote(driver)).await?;
                     ("isAfter", json!([other]), Some(other))
                 }
+                SelectorCondition::Within(selector) => {
+                    let other = Box::pin(selector.build_remote(driver)).await?;
+                    ("within", json!([other]), Some(other))
+                }
+                SelectorCondition::InWindow(bundle) => ("inWindow", json!([bundle]), None),
             };
             let result = driver
                 .call_api_raw(&format!("{prefix}.{method}"), Some(&current), args)
@@ -237,7 +258,7 @@ mod tests {
             let (stream, _) = listener.accept().await.unwrap();
             let (reader, mut writer) = stream.into_split();
             let mut lines = BufReader::new(reader).lines();
-            for index in 1..=3 {
+            for index in 1..=6 {
                 let line = lines.next_line().await.unwrap().unwrap();
                 let request: Value = serde_json::from_str(&line).unwrap();
                 server_calls.lock().await.push((
@@ -265,16 +286,94 @@ mod tests {
         .await
         .unwrap();
         let driver = HmDriver::with_test_rpc(rpc, ApiDialect::Modern);
-        let selector = Selector::new().id("title").text("设置").enabled(true);
-        assert_eq!(selector.build_remote(&driver).await.unwrap(), "On#3");
-        assert_eq!(driver.queued_reference_count(), 2);
+        let selector = Selector::new()
+            .id("title")
+            .text("设置")
+            .enabled(true)
+            .within(Selector::new().type_name("List"))
+            .in_window(&crate::AppIdentifier::new("com.example.app").unwrap());
+        assert_eq!(selector.build_remote(&driver).await.unwrap(), "On#6");
+        assert_eq!(driver.queued_reference_count(), 5);
         assert_eq!(
             *calls.lock().await,
             vec![
                 ("On.id".into(), "On#seed".into()),
                 ("On.text".into(), "On#1".into()),
                 ("On.enabled".into(), "On#2".into()),
+                ("On.type".into(), "On#seed".into()),
+                ("On.within".into(), "On#3".into()),
+                ("On.inWindow".into(), "On#5".into()),
             ]
+        );
+    }
+
+    #[tokio::test]
+    async fn element_scroll_operations_use_component_api() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let calls = Arc::new(TokioMutex::new(Vec::new()));
+        let server_calls = calls.clone();
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let (reader, mut writer) = stream.into_split();
+            let mut lines = BufReader::new(reader).lines();
+            for _ in 0..6 {
+                let request: Value =
+                    serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+                let api = request["params"]["api"].as_str().unwrap().to_owned();
+                server_calls
+                    .lock()
+                    .await
+                    .push((api.clone(), request["params"]["args"].clone()));
+                let result = match api.as_str() {
+                    "On.type" => json!("On#container"),
+                    "Driver.findComponents" => json!(["Component#container"]),
+                    "On.text" => json!("On#target"),
+                    "Component.scrollSearch" => json!("Component#target"),
+                    _ => Value::Null,
+                };
+                let response = json!({
+                    "request_id": request["request_id"],
+                    "result": result,
+                    "exception": null
+                });
+                writer
+                    .write_all(serde_json::to_string(&response).unwrap().as_bytes())
+                    .await
+                    .unwrap();
+                writer.write_all(b"\n").await.unwrap();
+            }
+        });
+        let rpc = crate::rpc::RpcClient::connect(
+            port,
+            Duration::from_secs(1),
+            Duration::from_secs(1),
+            1024,
+        )
+        .await
+        .unwrap();
+        let driver = HmDriver::with_test_rpc(rpc, ApiDialect::Modern);
+        let container = driver
+            .find(&Selector::new().type_name("List"))
+            .await
+            .unwrap()
+            .unwrap();
+        container.scroll_to_top().await.unwrap();
+        container.scroll_to_bottom_with_speed(1_000).await.unwrap();
+        let target = container
+            .scroll_search_with_options(&Selector::new().text("设置"), false, Some(20))
+            .await
+            .unwrap();
+        assert!(target.is_some());
+        let calls = calls.lock().await;
+        assert_eq!(calls[2], ("Component.scrollToTop".into(), json!([600])));
+        assert_eq!(calls[3], ("Component.scrollToBottom".into(), json!([1000])));
+        assert_eq!(
+            calls[5],
+            (
+                "Component.scrollSearch".into(),
+                json!(["On#target", false, 20]),
+            )
         );
     }
 }
