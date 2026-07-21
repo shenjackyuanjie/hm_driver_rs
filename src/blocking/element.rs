@@ -102,6 +102,39 @@ impl Element {
         block_on(self.inner.clear_text())?
     }
 
+    pub fn scroll_to_top(&self) -> Result<()> {
+        block_on(self.inner.scroll_to_top())?
+    }
+
+    pub fn scroll_to_top_with_speed(&self, speed: u32) -> Result<()> {
+        block_on(self.inner.scroll_to_top_with_speed(speed))?
+    }
+
+    pub fn scroll_to_bottom(&self) -> Result<()> {
+        block_on(self.inner.scroll_to_bottom())?
+    }
+
+    pub fn scroll_to_bottom_with_speed(&self, speed: u32) -> Result<()> {
+        block_on(self.inner.scroll_to_bottom_with_speed(speed))?
+    }
+
+    pub fn scroll_search(&self, selector: &crate::Selector) -> Result<Option<Element>> {
+        Ok(block_on(self.inner.scroll_search(selector))??.map(|inner| Element { inner }))
+    }
+
+    pub fn scroll_search_with_options(
+        &self,
+        selector: &crate::Selector,
+        vertical: bool,
+        offset: Option<u32>,
+    ) -> Result<Option<Element>> {
+        Ok(block_on(
+            self.inner
+                .scroll_search_with_options(selector, vertical, offset),
+        )??
+        .map(|inner| Element { inner }))
+    }
+
     pub fn drag_to(&self, target: &Element) -> Result<()> {
         block_on(self.inner.drag_to(&target.inner))?
     }
@@ -116,5 +149,14 @@ impl Element {
 
     pub fn wait_until_gone(&self, timeout: Duration) -> Result<bool> {
         block_on(self.inner.wait_until_gone(timeout))?
+    }
+
+    pub fn wait_for_attribute(
+        &self,
+        name: &str,
+        expected: &Value,
+        timeout: Duration,
+    ) -> Result<bool> {
+        block_on(self.inner.wait_for_attribute(name, expected, timeout))?
     }
 }

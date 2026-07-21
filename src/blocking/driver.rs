@@ -1,9 +1,9 @@
 use super::{Element, XPathElement, block_on};
 use crate::{
-    AbilityInfo, AgentProfile, AgentSource, AppIdentifier, CommandOutput, DeviceInfo,
-    DeviceSelector, DisplayRotation, DisplaySize, DriverConfig, ForwardEntry, Gesture, HdcConfig,
-    KeyCode, OpenUrlMode, Point, Position, Result, ScreenState, ScreenshotMethod, Selector,
-    SwipeArea, SwipeDirection, UiNode,
+    AbilityInfo, AgentProfile, AgentSource, AppIdentifier, CommandOutput, DeviceDescriptor,
+    DeviceInfo, DeviceSelector, DisplayRotation, DisplaySize, DriverConfig, ForwardEntry, Gesture,
+    HdcConfig, KeyCode, OpenUrlMode, Point, Position, Result, ScreenState, ScreenshotMethod,
+    Selector, SwipeArea, SwipeDirection, UiNode,
 };
 use serde_json::Value;
 use std::net::IpAddr;
@@ -63,8 +63,16 @@ impl HmDriver {
         HmDriverBuilder::default()
     }
 
+    pub fn discover_devices(config: HdcConfig) -> Result<Vec<DeviceDescriptor>> {
+        block_on(crate::HmDriver::discover_devices(config))?
+    }
+
     pub fn agent_profile(&self) -> &AgentProfile {
         self.inner.agent_profile()
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.inner.generation()
     }
 
     pub fn dialect(&self) -> Result<crate::ApiDialect> {
@@ -107,6 +115,10 @@ impl HmDriver {
         block_on(self.inner.screen_off())?
     }
 
+    pub fn toggle_screen_power(&self) -> Result<()> {
+        block_on(self.inner.toggle_screen_power())?
+    }
+
     pub fn screen_state(&self) -> Result<ScreenState> {
         block_on(self.inner.screen_state())?
     }
@@ -125,6 +137,10 @@ impl HmDriver {
 
     pub fn press_key_code(&self, key_code: KeyCode) -> Result<()> {
         block_on(self.inner.press_key_code(key_code))?
+    }
+
+    pub fn press_key_combination(&self, key_codes: &[KeyCode]) -> Result<()> {
+        block_on(self.inner.press_key_combination(key_codes))?
     }
 
     pub fn go_back(&self) -> Result<()> {
@@ -167,6 +183,28 @@ impl HmDriver {
         block_on(self.inner.swipe_positions(from, to, speed))?
     }
 
+    pub fn drag(&self, from: Point, to: Point, speed: u32) -> Result<()> {
+        block_on(self.inner.drag(from, to, speed))?
+    }
+
+    pub fn drag_positions(&self, from: Position, to: Position, speed: u32) -> Result<()> {
+        block_on(self.inner.drag_positions(from, to, speed))?
+    }
+
+    pub fn fling(&self, from: Point, to: Point, step_length: u32, speed: u32) -> Result<()> {
+        block_on(self.inner.fling(from, to, step_length, speed))?
+    }
+
+    pub fn fling_positions(
+        &self,
+        from: Position,
+        to: Position,
+        step_length: u32,
+        speed: u32,
+    ) -> Result<()> {
+        block_on(self.inner.fling_positions(from, to, step_length, speed))?
+    }
+
     pub fn swipe_direction(
         &self,
         direction: SwipeDirection,
@@ -183,6 +221,10 @@ impl HmDriver {
 
     pub fn input_text(&self, text: &str) -> Result<()> {
         block_on(self.inner.input_text(text))?
+    }
+
+    pub fn wait_for_idle(&self, idle_time: Duration, timeout: Duration) -> Result<()> {
+        block_on(self.inner.wait_for_idle(idle_time, timeout))?
     }
 
     pub fn install_app(&self, package: impl AsRef<Path>) -> Result<()> {
@@ -303,6 +345,44 @@ impl HmDriver {
 
     pub fn wait_for(&self, selector: &Selector, timeout: Duration) -> Result<Element> {
         block_on(self.inner.wait_for(selector, timeout))?.map(|inner| Element { inner })
+    }
+
+    pub fn wait_until<F>(&self, timeout: Duration, mut condition: F) -> Result<bool>
+    where
+        F: FnMut() -> Result<bool>,
+    {
+        block_on(
+            self.inner
+                .wait_until(timeout, || std::future::ready(condition())),
+        )?
+    }
+
+    pub fn wait_until_with_interval<F>(
+        &self,
+        timeout: Duration,
+        interval: Duration,
+        mut condition: F,
+    ) -> Result<bool>
+    where
+        F: FnMut() -> Result<bool>,
+    {
+        block_on(
+            self.inner
+                .wait_until_with_interval(timeout, interval, || std::future::ready(condition())),
+        )?
+    }
+
+    pub fn wait_for_xpath(&self, expression: &str, timeout: Duration) -> Result<XPathElement> {
+        block_on(self.inner.wait_for_xpath(expression, timeout))?
+            .map(|inner| XPathElement { inner })
+    }
+
+    pub fn wait_until_xpath_gone(&self, expression: &str, timeout: Duration) -> Result<bool> {
+        block_on(self.inner.wait_until_xpath_gone(expression, timeout))?
+    }
+
+    pub fn wait_for_app(&self, bundle: &AppIdentifier, timeout: Duration) -> Result<bool> {
+        block_on(self.inner.wait_for_app(bundle, timeout))?
     }
 
     pub fn xpath(&self, expression: &str) -> Result<XPathElement> {
