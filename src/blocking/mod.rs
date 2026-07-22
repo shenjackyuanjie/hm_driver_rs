@@ -43,6 +43,7 @@ use crate::Result;
 use std::future::Future;
 use std::sync::OnceLock;
 use tokio::runtime::Runtime;
+use tracing::{debug, trace};
 
 // ---------------------------------------------------------------------------
 // 全局 Tokio Runtime（进程级单例）
@@ -78,6 +79,7 @@ pub static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 fn block_on<F: Future>(future: F) -> Result<F::Output> {
     // 检测是否已在 Tokio 异步上下文中 —— 避免在异步执行器内阻塞导致死锁
     if tokio::runtime::Handle::try_current().is_ok() {
+        debug!(target: "hm_driver_rs::blocking", "在异步上下文中调用 block_on，拒绝执行");
         return Err(crate::DriverError::BlockingInAsyncContext);
     }
 
@@ -93,6 +95,7 @@ fn block_on<F: Future>(future: F) -> Result<F::Output> {
     };
 
     // 在全局 runtime 上阻塞执行 future
+    trace!(target: "hm_driver_rs::blocking", "block_on 执行 future");
     Ok(runtime.block_on(future))
 }
 

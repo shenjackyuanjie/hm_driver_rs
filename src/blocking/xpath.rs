@@ -1,5 +1,6 @@
 use super::block_on;
 use crate::{Bounds, Point, Result};
+use tracing::trace;
 
 /// 阻塞 XPath 查询结果。
 #[derive(Clone, Debug)]
@@ -58,16 +59,19 @@ impl XPathElement {
     ///
     /// 若 XPath 无匹配元素，则返回包含错误信息的 `Err`。
     pub fn click(&self) -> Result<()> {
+        trace!(target: "hm_driver_rs::blocking", "阻塞 XPathElement::click");
         block_on(self.inner.click())?
     }
 
     /// 双击匹配的元素。
     pub fn double_click(&self) -> Result<()> {
+        trace!(target: "hm_driver_rs::blocking", "阻塞 XPathElement::double_click");
         block_on(self.inner.double_click())?
     }
 
     /// 长按匹配的元素。
     pub fn long_click(&self) -> Result<()> {
+        trace!(target: "hm_driver_rs::blocking", "阻塞 XPathElement::long_click");
         block_on(self.inner.long_click())?
     }
 

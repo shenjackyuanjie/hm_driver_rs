@@ -2,13 +2,14 @@ use super::{Element, XPathElement, block_on};
 use crate::{
     AbilityInfo, AgentProfile, AgentSource, AppIdentifier, CommandOutput, DeviceDescriptor,
     DeviceInfo, DeviceSelector, DisplayRotation, DisplaySize, DriverConfig, ForwardEntry, Gesture,
-    HdcConfig, KeyCode, OpenUrlMode, Point, Position, Result, ScreenState, ScreenshotMethod,
-    Selector, SwipeArea, SwipeDirection, UiNode, MatchPattern,
+    HdcConfig, KeyCode, MatchPattern, OpenUrlMode, Point, Position, Result, ScreenState,
+    ScreenshotMethod, Selector, SwipeArea, SwipeDirection, UiNode,
 };
 use serde_json::Value;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use tracing::trace;
 
 /// 阻塞 Driver 的 Builder。
 #[derive(Clone, Debug, Default)]
@@ -67,6 +68,7 @@ impl HmDriverBuilder {
     ///
     /// 此方法会在当前线程阻塞直到连接完成或超时失败。
     pub fn connect(self) -> Result<HmDriver> {
+        trace!(target: "hm_driver_rs::blocking", "阻塞 HmDriver::connect");
         block_on(self.inner.connect())?.map(|inner| HmDriver { inner })
     }
 }
@@ -116,6 +118,7 @@ impl HmDriver {
     ///
     /// 当检测到连接异常时调用此方法可尝试重新建立连接。
     pub fn recover(&self) -> Result<()> {
+        trace!(target: "hm_driver_rs::blocking", "阻塞 HmDriver::recover");
         block_on(self.inner.recover())?
     }
 
@@ -123,6 +126,7 @@ impl HmDriver {
     ///
     /// 调用后 driver 实例不应再被使用。
     pub fn close(&self) -> Result<()> {
+        trace!(target: "hm_driver_rs::blocking", "阻塞 HmDriver::close");
         block_on(self.inner.close())?
     }
 

@@ -2,6 +2,7 @@ use super::block_on;
 use crate::{Bounds, ElementInfo, Point, Result};
 use serde_json::Value;
 use std::time::Duration;
+use tracing::trace;
 
 /// 阻塞控件句柄。
 #[derive(Debug)]
@@ -109,16 +110,19 @@ impl Element {
 
     /// 点击控件（点击中心点）。
     pub fn click(&self) -> Result<()> {
+        trace!(target: "hm_driver_rs::blocking", "阻塞 Element::click");
         block_on(self.inner.click())?
     }
 
     /// 双击控件。
     pub fn double_click(&self) -> Result<()> {
+        trace!(target: "hm_driver_rs::blocking", "阻塞 Element::double_click");
         block_on(self.inner.double_click())?
     }
 
     /// 长按控件。
     pub fn long_click(&self) -> Result<()> {
+        trace!(target: "hm_driver_rs::blocking", "阻塞 Element::long_click");
         block_on(self.inner.long_click())?
     }
 
