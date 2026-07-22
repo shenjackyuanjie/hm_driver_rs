@@ -9,6 +9,17 @@
 `hm_driver_rs` 是原生 Rust HarmonyOS UI 自动化驱动。它通过 HDC 启动官方 UITest
 Agent，并以 Hypium JSON RPC 提供异步 API 和可选的阻塞门面。
 
+## 遥测与隐私
+
+`hm_driver_rs` 不加载 Hypium 或 XDevice 的 Python 代码，也不包含其 telemetry
+事件收集与上传逻辑，因此无需运行 `python -m hypium telemetry disable`。驱动的 TCP
+连接仅指向 `127.0.0.1`，用于通过 HDC forward 与设备端 UITest Agent 通信；协议中的
+`hypium` 和 `xdevice` 字段只是官方 Agent 所要求的 RPC 消息格式。
+
+仓库内嵌的 UITest Agent 来自官方 Hypium 软件包，属于第三方闭源二进制。当前静态检查
+未发现其中包含独立的遥测上传逻辑；其来源与许可说明参见
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+
 ## 使用方式
 
 ```rust,no_run
