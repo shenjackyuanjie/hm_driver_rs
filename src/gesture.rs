@@ -1,5 +1,6 @@
 use crate::{DisplaySize, DriverError, Point, Position, Result};
 use std::time::Duration;
+use tracing::trace;
 
 const DEFAULT_SAMPLE_INTERVAL: Duration = Duration::from_millis(50);
 const MIN_SAMPLE_MILLIS: u128 = 10;
@@ -31,6 +32,7 @@ pub struct GesturePath {
 impl GesturePath {
     /// 创建一个新的手势路径，从指定位置开始并保持指定时长。
     pub fn new(position: Position, hold: Duration) -> Result<Self> {
+        trace!(target: "hm_driver_rs::gesture", ?position, ?hold, "手势路径起点");
         validate_duration(hold)?;
         Ok(Self {
             steps: vec![GestureStep::Start { position, hold }],
@@ -39,6 +41,7 @@ impl GesturePath {
 
     /// 在当前路径上添加一个移动到指定位置的步骤，动画持续时长为 `duration`。
     pub fn move_to(mut self, position: Position, duration: Duration) -> Result<Self> {
+        trace!(target: "hm_driver_rs::gesture", ?position, ?duration, "手势路径移动到");
         validate_duration(duration)?;
         self.steps.push(GestureStep::Move { position, duration });
         Ok(self)
@@ -46,6 +49,7 @@ impl GesturePath {
 
     /// 在当前路径上添加一个暂停步骤，在当前位置保持指定时长。
     pub fn pause(mut self, duration: Duration) -> Result<Self> {
+        trace!(target: "hm_driver_rs::gesture", ?duration, "手势路径暂停");
         validate_duration(duration)?;
         self.steps.push(GestureStep::Pause { duration });
         Ok(self)
@@ -63,6 +67,7 @@ pub struct Gesture {
 impl Gesture {
     /// 创建一个新手势，包含指定的单根手指轨迹。
     pub fn new(path: GesturePath) -> Self {
+        trace!(target: "hm_driver_rs::gesture", "新手势");
         Self {
             paths: vec![path],
             sample_interval: DEFAULT_SAMPLE_INTERVAL,
@@ -72,6 +77,7 @@ impl Gesture {
 
     /// 为手势添加一根新的手指轨迹，最多支持 10 根手指。
     pub fn add_path(mut self, path: GesturePath) -> Result<Self> {
+        trace!(target: "hm_driver_rs::gesture", total_paths = self.paths.len() + 1, "添加手指轨迹");
         if self.paths.len() >= MAX_FINGERS {
             return Err(DriverError::InvalidGesture(format!(
                 "手指数量不能超过 {MAX_FINGERS}"
@@ -108,13 +114,14 @@ impl Gesture {
         self.injection_speed
     }
 
-    pub(crate) fn compile(&self, display: DisplaySize) -> Result<Vec<Vec<EncodedPoint>>> {
+    pub(crate) fn compile(&self, display_size: DisplaySize) -> Result<Vec<Vec<EncodedPoint>>> {
         let sample_millis = u32::try_from(self.sample_interval.as_millis())
             .map_err(|_| DriverError::InvalidGesture("采样间隔超出范围".into()))?;
+        trace!(target: "hm_driver_rs::gesture", width = display_size.width, height = display_size.height, "编译手势");
         let mut matrix = self
             .paths
             .iter()
-            .map(|path| compile_path(path, display, sample_millis))
+            .map(|path| compile_path(path, display_size, sample_millis))
             .collect::<Result<Vec<_>>>()?;
         let total_points = matrix.iter().map(Vec::len).max().unwrap_or_default();
         if total_points == 0 || total_points > MAX_POINTS {

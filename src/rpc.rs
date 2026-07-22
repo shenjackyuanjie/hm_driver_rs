@@ -8,6 +8,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio::time::timeout;
+use tracing::{debug, trace};
 
 const MODULE: &str = "com.ohos.devicetest.hypiumApiHelper";
 const METHOD: &str = "callHypiumApi";
@@ -113,6 +114,7 @@ impl RpcClient {
             })?
             .map_err(DriverError::RpcConnect)?;
         stream.set_nodelay(true).map_err(DriverError::RpcIo)?;
+        debug!(target: "hm_driver_rs::rpc", port = port, "RPC 已连接");
         Ok(Self {
             inner: Arc::new(RpcClientInner {
                 connection: Mutex::new(RpcConnection {
@@ -132,6 +134,7 @@ impl RpcClient {
     }
 
     pub fn invalidate(&self) {
+        debug!(target: "hm_driver_rs::rpc", "RPC 会话已失效");
         self.inner.valid.store(false, Ordering::Release);
     }
 
@@ -147,7 +150,9 @@ impl RpcClient {
         args: Value,
         request_timeout: Duration,
     ) -> Result<Value> {
+        trace!(target: "hm_driver_rs::rpc", api = %api, "调用 API");
         if !self.is_valid() {
+            debug!(target: "hm_driver_rs::rpc", "API 调用被拒绝：会话无效");
             return Err(DriverError::SessionInvalid);
         }
         let request_id = self
@@ -208,14 +213,22 @@ impl RpcClient {
         let outcome = timeout(request_timeout, operation).await;
         in_flight.disarm();
         match outcome {
-            Ok(Ok(value)) => Ok(value),
-            Ok(Err(error @ DriverError::Hypium(_))) => Err(error),
+            Ok(Ok(value)) => {
+                trace!(target: "hm_driver_rs::rpc", api = %api, "API 调用成功");
+                Ok(value)
+            }
+            Ok(Err(error @ DriverError::Hypium(_))) => {
+                debug!(target: "hm_driver_rs::rpc", api = %api, error = %error, "API 返回 Hypium 异常");
+                Err(error)
+            }
             Ok(Err(error)) => {
                 self.invalidate();
+                debug!(target: "hm_driver_rs::rpc", api = %api, error = %error, "API 调用失败");
                 Err(error)
             }
             Err(_) => {
                 self.invalidate();
+                debug!(target: "hm_driver_rs::rpc", api = %api, "API 调用超时");
                 Err(DriverError::RpcTimeout {
                     timeout: request_timeout,
                 })

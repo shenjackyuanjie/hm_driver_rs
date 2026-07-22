@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use sxd_document::Package;
 use sxd_document::dom::{Document, Element as DomElement};
 use sxd_xpath::{Context, Factory, Value};
+use tracing::trace;
 
 /// XPath 查询结果的属性和 bounds 快照。
 #[derive(Clone)]
@@ -26,6 +27,7 @@ impl std::fmt::Debug for XPathElement {
 
 impl XPathElement {
     pub(crate) fn query(driver: HmDriver, root: &UiNode, expression: &str) -> Result<Vec<Self>> {
+        trace!(target: "hm_driver_rs::xpath", expression = %expression, "XPath 查询");
         let package = Package::new();
         let document = package.as_document();
         let name_pattern = Regex::new(r"^[A-Za-z_][A-Za-z0-9_.-]*$")
@@ -99,16 +101,19 @@ impl XPathElement {
 
     /// 点击该控件的中心位置。
     pub async fn click(&self) -> Result<()> {
+        trace!(target: "hm_driver_rs::xpath", "XPath 点击");
         self.driver.click(self.required_center()?).await
     }
 
     /// 双击该控件的中心位置。
     pub async fn double_click(&self) -> Result<()> {
+        trace!(target: "hm_driver_rs::xpath", "XPath 双击");
         self.driver.double_click(self.required_center()?).await
     }
 
     /// 长按该控件的中心位置。
     pub async fn long_click(&self) -> Result<()> {
+        trace!(target: "hm_driver_rs::xpath", "XPath 长按");
         self.driver.long_click(self.required_center()?).await
     }
 

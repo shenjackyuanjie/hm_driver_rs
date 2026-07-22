@@ -8,6 +8,7 @@ use crate::driver::HmDriver;
 use crate::rpc::ApiDialect;
 use crate::{DriverError, Result};
 use serde_json::{Value, json};
+use tracing::trace;
 
 /// 字符串属性的匹配方式。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -192,6 +193,7 @@ impl Selector {
     }
 
     pub(crate) async fn build_remote(&self, driver: &HmDriver) -> Result<String> {
+        trace!(target: "hm_driver_rs::selector", conditions = self.conditions.len(), "构建远端选择器");
         let dialect = driver.dialect().await?;
         let prefix = dialect.selector();
         let mut current = format!("{prefix}#seed");

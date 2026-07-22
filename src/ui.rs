@@ -2,6 +2,7 @@ use crate::{Bounds, DriverError, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
+use tracing::trace;
 
 /// `uitest dumpLayout` 返回的一个 UI 节点。
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -47,11 +48,16 @@ impl UiNode {
     ///
     /// 返回 `None` 表示未找到。
     pub fn find(&self, predicate: impl Fn(&UiNode) -> bool) -> Option<&UiNode> {
+        trace!(target: "hm_driver_rs::ui", "查找节点");
+        self.find_ref(&predicate)
+    }
+
+    fn find_ref(&self, predicate: &impl Fn(&UiNode) -> bool) -> Option<&UiNode> {
         if predicate(self) {
             return Some(self);
         }
         for child in &self.children {
-            if let Some(found) = child.find(&predicate) {
+            if let Some(found) = child.find_ref(predicate) {
                 return Some(found);
             }
         }
@@ -60,6 +66,7 @@ impl UiNode {
 
     /// 在 UI 树中深度优先搜索所有满足 `predicate` 的节点。
     pub fn find_all(&self, predicate: impl Fn(&UiNode) -> bool) -> Vec<&UiNode> {
+        trace!(target: "hm_driver_rs::ui", "查找所有匹配节点");
         let mut result = Vec::new();
         self.collect_all(&predicate, &mut result);
         result
@@ -83,6 +90,7 @@ impl UiNode {
     /// 供在不通过 [`crate::HmDriver::ui_tree`] 的情况下（例如自行用 `raw_shell`/
     /// `pull_file` 取回 dump 文件）复用同样的解析逻辑。
     pub fn from_layout_json(value: Value) -> Result<UiNode> {
+        trace!(target: "hm_driver_rs::ui", "解析布局 JSON");
         let root = if let Some(root) = value.get("root") {
             root.clone()
         } else {

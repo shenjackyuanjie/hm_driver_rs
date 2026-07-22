@@ -8,6 +8,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use tokio::fs;
+use tracing::{debug, info, trace, warn};
 
 /// Agent 与主机通信时使用的 HDC 转发类型。
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -115,7 +116,9 @@ impl AgentResolver {
         let architecture = normalize_architecture(architecture)?;
         let version = version.parse::<UitestVersion>()?;
         if architecture == "x86_64" {
-            return self.catalog.profile("1.1.9", "x86_64");
+            let profile = self.catalog.profile("1.1.9", "x86_64")?;
+            debug!(target: "hm_driver_rs::agent", agent = %profile.file_name, arch = %architecture, "Agent 解析结果");
+            return Ok(profile);
         }
         let agent_version = if version > UitestVersion([6, 0, 2, 1]) {
             "1.2.2"
@@ -126,7 +129,9 @@ impl AgentResolver {
         } else {
             "1.1.3"
         };
-        self.catalog.profile(agent_version, "arm64")
+        let profile = self.catalog.profile(agent_version, "arm64")?;
+        debug!(target: "hm_driver_rs::agent", agent = %profile.file_name, arch = %architecture, "Agent 解析结果");
+        Ok(profile)
     }
 }
 
@@ -145,13 +150,19 @@ pub(crate) async fn materialize_agent(
     source: &AgentSource,
     profile: &AgentProfile,
 ) -> Result<PathBuf> {
+    info!(target: "hm_driver_rs::agent", agent = %profile.file_name, "物化 Agent");
     match source {
         AgentSource::Directory(directory) => {
             let path = directory.join(&profile.file_name);
+            debug!(target: "hm_driver_rs::agent", path = %path.display(), "检查目录中的 Agent");
             verify_file(&path, profile).await?;
+            debug!(target: "hm_driver_rs::agent", path = %path.display(), "Agent 就绪");
             Ok(path)
         }
-        AgentSource::Embedded => materialize_embedded(profile).await,
+        AgentSource::Embedded => {
+            debug!(target: "hm_driver_rs::agent", agent = %profile.file_name, "物化内嵌 Agent");
+            materialize_embedded(profile).await
+        }
     }
 }
 
@@ -197,14 +208,20 @@ async fn materialize_embedded(profile: &AgentProfile) -> Result<PathBuf> {
 
 async fn verify_file(path: &Path, profile: &AgentProfile) -> Result<()> {
     if !fs::try_exists(path).await.unwrap_or(false) {
+        warn!(target: "hm_driver_rs::agent", path = %path.display(), "Agent 文件不存在");
         return Err(DriverError::AgentNotFound(path.to_owned()));
     }
     let bytes = fs::read(path).await?;
-    verify_bytes(&bytes, profile)
+    let result = verify_bytes(&bytes, profile);
+    if result.is_ok() {
+        trace!(target: "hm_driver_rs::agent", path = %path.display(), "Agent 文件验证通过");
+    }
+    result
 }
 
 fn verify_bytes(bytes: &[u8], profile: &AgentProfile) -> Result<()> {
     if bytes.len() as u64 != profile.size {
+        warn!(target: "hm_driver_rs::agent", expected = profile.size, actual = bytes.len(), "Agent 大小不匹配");
         return Err(DriverError::AgentVerification(
             "Agent 文件大小不匹配".into(),
         ));
@@ -215,10 +232,12 @@ fn verify_bytes(bytes: &[u8], profile: &AgentProfile) -> Result<()> {
         let _ = write!(actual, "{byte:02x}");
     }
     if actual != profile.sha256 {
+        warn!(target: "hm_driver_rs::agent", agent = %profile.file_name, "Agent SHA-256 不匹配");
         return Err(DriverError::AgentVerification(
             "Agent SHA-256 不匹配".into(),
         ));
     }
+    trace!(target: "hm_driver_rs::agent", agent = %profile.file_name, "Agent 验证通过");
     Ok(())
 }
 

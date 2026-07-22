@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use std::sync::Mutex;
 use std::time::Duration;
 use tokio::time::{Instant, timeout_at};
+use tracing::{debug, trace};
 
 struct ElementState {
     remote_reference: Option<String>,
@@ -87,6 +88,7 @@ impl Element {
     }
 
     async fn reference(&self) -> Result<String> {
+        trace!(target: "hm_driver_rs::element", "解析元素引用");
         let generation = self.driver.generation();
         {
             let state = self.state.lock().expect("控件状态锁中毒");
@@ -113,6 +115,7 @@ impl Element {
     }
 
     async fn operate(&self, method: &str, args: Value) -> Result<Value> {
+        trace!(target: "hm_driver_rs::element", method = %method, "元素操作");
         let reference = self.reference().await?;
         let dialect = self.driver.dialect().await?;
         self.driver
@@ -236,6 +239,7 @@ impl Element {
     /// 与逐个调用属性方法相比，此方法在一次往返中获取所有信息，
     /// 但在默认实现中仍然是通过多次 API 调用完成的。
     pub async fn info(&self) -> Result<ElementInfo> {
+        debug!(target: "hm_driver_rs::element", "获取元素完整信息");
         let id = self.id().await?;
         let key = self.key().await?;
         let type_name = self.type_name().await?;
@@ -273,16 +277,19 @@ impl Element {
 
     /// 点击控件。
     pub async fn click(&self) -> Result<()> {
+        trace!(target: "hm_driver_rs::element", "点击元素");
         self.operate("click", json!([])).await.map(|_| ())
     }
 
     /// 双击控件。
     pub async fn double_click(&self) -> Result<()> {
+        trace!(target: "hm_driver_rs::element", "双击元素");
         self.operate("doubleClick", json!([])).await.map(|_| ())
     }
 
     /// 长按控件。
     pub async fn long_click(&self) -> Result<()> {
+        trace!(target: "hm_driver_rs::element", "长按元素");
         self.operate("longClick", json!([])).await.map(|_| ())
     }
 
@@ -400,6 +407,7 @@ impl Element {
     /// 在指定超时时间内不断尝试查找控件，若控件已不存在则返回 `true`，
     /// 超时后仍未消失则返回 `false`。
     pub async fn wait_until_gone(&self, timeout: Duration) -> Result<bool> {
+        debug!(target: "hm_driver_rs::element", ?timeout, "等待元素消失");
         let deadline = Instant::now() + timeout;
         loop {
             if Instant::now() >= deadline {
@@ -427,6 +435,7 @@ impl Element {
         expected: &Value,
         timeout: Duration,
     ) -> Result<bool> {
+        debug!(target: "hm_driver_rs::element", name = %name, ?timeout, "等待元素属性");
         let deadline = Instant::now() + timeout;
         loop {
             if Instant::now() >= deadline {
