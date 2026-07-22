@@ -13,6 +13,7 @@ use std::time::Duration;
 /// 阻塞 Driver 的 Builder。
 #[derive(Clone, Debug, Default)]
 pub struct HmDriverBuilder {
+    /// 底层异步 Driver Builder 实例。
     inner: crate::HmDriverBuilder,
 }
 
@@ -73,6 +74,7 @@ impl HmDriverBuilder {
 /// 与异步 Driver 能力对应的阻塞门面。
 #[derive(Clone, Debug)]
 pub struct HmDriver {
+    /// 底层异步 Driver 实例。
     inner: crate::HmDriver,
 }
 

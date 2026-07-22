@@ -69,9 +69,13 @@ impl Default for DriverConfig {
 /// 创建异步 Driver 的 Builder。
 #[derive(Clone, Debug, Default)]
 pub struct HmDriverBuilder {
+    /// 目标设备选择器（序列号 / USB / 网络）。
     selector: DeviceSelector,
+    /// HDC 连接配置（路径 / 服务地址）。
     hdc: HdcConfig,
+    /// Agent 来源（APK / Hap 包路径）。
     agent_source: AgentSource,
+    /// 驱动运行时配置（超时、帧大小等）。
     config: DriverConfig,
 }
 

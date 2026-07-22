@@ -17,8 +17,11 @@ use tokio::time::timeout;
 pub struct HdcConfig {
     pub(crate) path: Option<PathBuf>,
     pub(crate) server: Option<(String, u16)>,
+    /// 命令执行的超时时间。
     pub command_timeout: Duration,
+    /// 文件传输操作的超时时间。
     pub transfer_timeout: Duration,
+    /// 与 HDC agent 通信的超时时间。
     pub agent_timeout: Duration,
 }
 
@@ -65,8 +68,11 @@ impl HdcConfig {
 /// HDC 命令的成功输出。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommandOutput {
+    /// 命令的标准输出。
     pub stdout: String,
+    /// 命令的错误输出。
     pub stderr: String,
+    /// 命令的退出状态码。
     pub status: i32,
 }
 

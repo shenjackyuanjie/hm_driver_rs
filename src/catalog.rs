@@ -5,8 +5,11 @@ use serde::Deserialize;
 /// 随 crate 随带的官方 Agent 清单，可在不连接设备的情况下查阅已验证的 Agent 信息。
 #[derive(Debug, Deserialize)]
 pub struct AgentCatalog {
+    /// 官方来源包文件名。
     pub source_package: String,
+    /// 官方来源 wheel 文件名。
     pub source_wheel: String,
+    /// 所有官方 Agent 的配置列表。
     pub agents: Vec<AgentProfile>,
 }
 

@@ -53,28 +53,38 @@ pub enum DeviceSelector {
 /// HDC 报告的设备状态。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DeviceStatus {
+    /// 设备在线。
     Online,
+    /// 设备离线。
     Offline,
+    /// 设备未授权。
     Unauthorized,
+    /// 未知状态。
     Unknown(String),
 }
 
 /// 发现到的设备摘要。
 #[derive(Clone, Debug)]
 pub struct DeviceDescriptor {
+    /// 设备序列号。
     pub serial: DeviceSerial,
+    /// 设备状态。
     pub status: DeviceStatus,
+    /// 设备详情。
     pub details: Vec<String>,
 }
 
 /// 屏幕绝对坐标。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Point {
+    /// 横坐标。
     pub x: i32,
+    /// 纵坐标。
     pub y: i32,
 }
 
 impl Point {
+    /// 使用给定的 x、y 坐标创建一个绝对坐标点。
     pub const fn new(x: i32, y: i32) -> Self {
         Self { x, y }
     }
@@ -83,11 +93,14 @@ impl Point {
 /// 0 到 1 范围内的归一化坐标。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NormalizedPoint {
+    /// 归一化后的横坐标。
     pub x: f64,
+    /// 归一化后的纵坐标。
     pub y: f64,
 }
 
 impl NormalizedPoint {
+    /// 创建一个归一化坐标点，坐标值必须在 0 到 1 之间。
     pub fn new(x: f64, y: f64) -> Result<Self> {
         if x.is_finite() && y.is_finite() && (0.0..=1.0).contains(&x) && (0.0..=1.0).contains(&y) {
             Ok(Self { x, y })
@@ -122,15 +135,19 @@ impl NormalizedPoint {
 /// 可接受绝对或归一化坐标的位置。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Position {
+    /// 绝对坐标。
     Absolute(Point),
+    /// 归一化坐标。
     Normalized(NormalizedPoint),
 }
 
 impl Position {
+    /// 使用绝对坐标创建一个位置。
     pub const fn absolute(x: i32, y: i32) -> Self {
         Self::Absolute(Point::new(x, y))
     }
 
+    /// 使用归一化坐标创建一个位置。
     pub fn normalized(x: f64, y: f64) -> Result<Self> {
         NormalizedPoint::new(x, y).map(Self::Normalized)
     }
@@ -159,9 +176,13 @@ impl From<NormalizedPoint> for Position {
 /// 控件边界。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Bounds {
+    /// 左边界。
     pub left: i32,
+    /// 上边界。
     pub top: i32,
+    /// 右边界。
     pub right: i32,
+    /// 下边界。
     pub bottom: i32,
 }
 
@@ -245,7 +266,9 @@ impl Bounds {
 /// 显示区域大小。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DisplaySize {
+    /// 显示宽度（像素）。
     pub width: u32,
+    /// 显示高度（像素）。
     pub height: u32,
 }
 
@@ -253,9 +276,13 @@ pub struct DisplaySize {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum DisplayRotation {
+    /// 默认方向（0 度）。
     Rotation0 = 0,
+    /// 顺时针旋转 90 度。
     Rotation90 = 1,
+    /// 顺时针旋转 180 度。
     Rotation180 = 2,
+    /// 顺时针旋转 270 度。
     Rotation270 = 3,
 }
 
@@ -276,23 +303,36 @@ impl TryFrom<u64> for DisplayRotation {
 /// 设备系统与显示信息。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeviceInfo {
+    /// 产品名称。
     pub product_name: String,
+    /// 设备型号。
     pub model: String,
+    /// 设备品牌。
     pub brand: String,
+    /// API 版本。
     pub api_version: Option<u32>,
+    /// 系统版本。
     pub system_version: String,
+    /// CPU ABI。
     pub cpu_abi: String,
+    /// WLAN IP 地址。
     pub wlan_ip: Option<IpAddr>,
+    /// 显示区域大小。
     pub display_size: DisplaySize,
+    /// 显示旋转方向。
     pub display_rotation: DisplayRotation,
 }
 
 /// 设备当前屏幕电源状态。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenState {
+    /// 屏幕未激活。
     Inactive,
+    /// 屏幕休眠。
     Sleep,
+    /// 屏幕唤醒。
     Awake,
+    /// 未知状态。
     Unknown(String),
 }
 
@@ -312,47 +352,64 @@ pub enum ScreenshotMethod {
     /// 优先使用 snapshot_display，失败时回退到 UITest screenCap。
     #[default]
     Auto,
+    /// 使用 snapshot display 截图。
     SnapshotDisplay,
+    /// 使用 UITest screenCap 截图。
     ScreenCap,
 }
 
 /// HDC forward 的端点。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ForwardEndpoint {
+    /// TCP 端点。
     Tcp(u16),
+    /// 本地抽象套接字端点。
     LocalAbstract(String),
+    /// 其他类型的端点。
     Other(String),
 }
 
 /// 一条 HDC forward 映射。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ForwardEntry {
+    /// 本地端点。
     pub local: ForwardEndpoint,
+    /// 远程端点。
     pub remote: ForwardEndpoint,
 }
 
 /// 页面滑动方向。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SwipeDirection {
+    /// 向上滑动。
     Up,
+    /// 向下滑动。
     Down,
+    /// 向左滑动。
     Left,
+    /// 向右滑动。
     Right,
 }
 
 /// 方向滑动使用的屏幕区域。
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum SwipeArea {
+    /// 全屏区域。
     #[default]
     FullScreen,
+    /// 绝对坐标区域。
     Absolute(Bounds),
+    /// 归一化坐标区域。
     Normalized {
+        /// 左上角归一化坐标。
         top_left: NormalizedPoint,
+        /// 右下角归一化坐标。
         bottom_right: NormalizedPoint,
     },
 }
 
 impl SwipeArea {
+    /// 使用归一化坐标创建一个方向滑动区域。
     pub fn normalized(left: f64, top: f64, right: f64, bottom: f64) -> Result<Self> {
         let top_left = NormalizedPoint::new(left, top)?;
         let bottom_right = NormalizedPoint::new(right, bottom)?;
@@ -404,10 +461,15 @@ impl SwipeArea {
 /// 从 bundle 元数据中解析出的 Ability。
 #[derive(Clone, Debug, PartialEq)]
 pub struct AbilityInfo {
+    /// Ability 名称。
     pub name: String,
+    /// 模块名称。
     pub module_name: String,
+    /// 模块主 Ability。
     pub module_main_ability: Option<String>,
+    /// 主模块名称。
     pub main_module: Option<String>,
+    /// 是否为启动器 Ability。
     pub is_launcher: bool,
     /// `bm dump` 中对应 Ability 的原始对象，保留平台扩展字段。
     pub raw: serde_json::Value,
@@ -418,6 +480,7 @@ pub struct AbilityInfo {
 pub struct AppIdentifier(String);
 
 impl AppIdentifier {
+    /// 创建一个新的应用标识符，同时校验是否满足 HarmonyOS 标识符规则。
     pub fn new(value: impl Into<String>) -> Result<Self> {
         let value = value.into();
         if is_valid_identifier(&value) {

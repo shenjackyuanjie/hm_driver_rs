@@ -16,16 +16,22 @@ use tokio::net::TcpListener;
 
 /// 成功建立 RPC 会话后的全部上下文。
 pub(super) struct EstablishedSession {
+    /// 已连接的 RPC 客户端。
     pub(super) rpc: RpcClient,
+    /// RPC API 方言（Legacy / Modern）。
     pub(super) dialect: ApiDialect,
+    /// 远端 Driver 对象的引用标识。
     pub(super) driver_reference: String,
+    /// 会话持有的端口转发列表。
     pub(super) owned_forwards: Vec<OwnedForward>,
 }
 
 /// 已建立的本地-远程端口转发记录。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct OwnedForward {
+    /// 本地监听的端口号。
     pub(super) local_port: u16,
+    /// 远端转发目标地址（如 `tcp:1234`）。
     pub(super) remote: String,
 }
 

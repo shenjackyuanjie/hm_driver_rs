@@ -12,9 +12,13 @@ use serde_json::{Value, json};
 /// 字符串属性的匹配方式。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MatchPattern {
+    /// 精确匹配。
     Equals(String),
+    /// 包含匹配。
     Contains(String),
+    /// 前缀匹配。
     StartsWith(String),
+    /// 后缀匹配。
     EndsWith(String),
 }
 

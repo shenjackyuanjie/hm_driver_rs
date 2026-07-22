@@ -13,29 +13,48 @@ use tokio::fs;
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HarmonyTransport {
-    Tcp { remote_port: u16 },
-    LocalAbstract { socket_name: String },
+    /// TCP 转发，连接设备上指定端口的 Agent。
+    Tcp {
+        /// 本地转发端口号。
+        remote_port: u16,
+    },
+    /// 本地抽象套接字转发。
+    LocalAbstract {
+        /// 抽象套接字名称。
+        socket_name: String,
+    },
 }
 
 /// Agent 分支的验证状态。
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CompatibilityStatus {
+    /// 本地验证通过的官方 Agent。
     LocallyVerified,
+    /// 仅官方参考，未经本地验证。
     OfficialReferenceOnly,
 }
 
 /// 官方 Agent catalog 中的一条记录。
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct AgentProfile {
+    /// Agent 在 catalog 中的相对路径。
     pub path: String,
+    /// Agent 文件名。
     pub file_name: String,
+    /// Agent 文件大小（字节）。
     pub size: u64,
+    /// Agent 文件的 SHA-256 哈希值。
     pub sha256: String,
+    /// 目标设备架构。
     pub architecture: String,
+    /// Agent 版本号。
     pub version: String,
+    /// Agent 使用的 HDC 传输方式。
     pub transport: HarmonyTransport,
+    /// 用途说明（如配套的工具链版本）。
     pub condition: String,
+    /// 兼容性验证状态。
     pub compatibility: CompatibilityStatus,
 }
 

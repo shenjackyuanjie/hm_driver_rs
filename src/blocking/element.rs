@@ -6,6 +6,7 @@ use std::time::Duration;
 /// 阻塞控件句柄。
 #[derive(Debug)]
 pub struct Element {
+    /// 底层异步 Element 实例。
     pub(super) inner: crate::Element,
 }
 

@@ -16,7 +16,9 @@ const METHOD: &str = "callHypiumApi";
 /// 体系与旧版 `UiDriver`/`By`/`UiComponent` 体系。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ApiDialect {
+    /// 现代 API 方言（`Driver`/`On`/`Component`）。
     Modern,
+    /// 旧版 API 方言（`UiDriver`/`By`/`UiComponent`）。
     Legacy,
 }
 

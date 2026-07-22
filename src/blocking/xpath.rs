@@ -4,6 +4,7 @@ use crate::{Bounds, Point, Result};
 /// 阻塞 XPath 查询结果。
 #[derive(Clone, Debug)]
 pub struct XPathElement {
+    /// 底层异步 XPathElement 实例。
     pub(super) inner: crate::XPathElement,
 }
 

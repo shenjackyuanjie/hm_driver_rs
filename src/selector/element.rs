@@ -24,21 +24,37 @@ pub struct Element {
 /// 一次性读取的完整控件属性。
 #[derive(Clone, Debug, PartialEq)]
 pub struct ElementInfo {
+    /// 控件的资源 ID。
     pub id: String,
+    /// 控件的键值。
     pub key: String,
+    /// 控件的类型名称。
     pub type_name: String,
+    /// 控件的文本内容。
     pub text: String,
+    /// 控件的描述内容。
     pub description: String,
+    /// 控件的提示文本。
     pub hint: String,
+    /// 控件是否被选中。
     pub selected: bool,
+    /// 控件是否被勾选。
     pub checked: bool,
+    /// 控件是否已启用。
     pub enabled: bool,
+    /// 控件是否已获取焦点。
     pub focused: bool,
+    /// 控件是否可被勾选。
     pub checkable: bool,
+    /// 控件是否可被点击。
     pub clickable: bool,
+    /// 控件是否可被长按。
     pub long_clickable: bool,
+    /// 控件是否可滚动。
     pub scrollable: bool,
+    /// 控件的边界矩形。
     pub bounds: Bounds,
+    /// 控件边界矩形的中心点坐标。
     pub bounds_center: crate::Point,
 }
 

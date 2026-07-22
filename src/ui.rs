@@ -7,10 +7,13 @@ use std::collections::BTreeMap;
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct UiNode {
     #[serde(default)]
+    /// 节点的标准属性键值对。
     pub attributes: BTreeMap<String, Value>,
     #[serde(default)]
+    /// 子节点列表。
     pub children: Vec<UiNode>,
     #[serde(flatten)]
+    /// 额外的非标准属性（展平到同一层级）。
     pub extra: BTreeMap<String, Value>,
 }
 
