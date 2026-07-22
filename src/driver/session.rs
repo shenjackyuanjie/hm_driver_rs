@@ -14,6 +14,7 @@ use std::time::Duration;
 use tempfile::tempdir;
 use tokio::net::TcpListener;
 
+/// 成功建立 RPC 会话后的全部上下文。
 pub(super) struct EstablishedSession {
     pub(super) rpc: RpcClient,
     pub(super) dialect: ApiDialect,
@@ -21,23 +22,30 @@ pub(super) struct EstablishedSession {
     pub(super) owned_forwards: Vec<OwnedForward>,
 }
 
+/// 已建立的本地-远程端口转发记录。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct OwnedForward {
     pub(super) local_port: u16,
     pub(super) remote: String,
 }
 
+/// 端口转发清理失败的信息。
 pub(super) struct ForwardCleanupIssue {
     forward: OwnedForward,
     error: DriverError,
 }
 
+/// 设备端探测结果：架构、uitest 版本与 API Level。
 pub(super) struct DeviceProbe {
+    /// CPU 架构标识（`arm64` / `x86_64`）。
     pub(super) architecture: String,
+    /// uitest 工具的版本号（四段式，如 `6.0.2.2`）。
     pub(super) uitest_version: String,
+    /// 系统 API Level（从 `const.ohos.apiversion` 获取）。
     pub(super) api_level: Option<u32>,
 }
 
+/// 探测设备端架构、uitest 版本与 API Level。
 pub(super) async fn probe_device(hdc: &HdcRunner) -> Result<DeviceProbe> {
     let file = hdc.shell("file /system/bin/uitest").await?;
     let architecture = if file.stdout.to_ascii_lowercase().contains("x86-64")
@@ -67,6 +75,7 @@ pub(super) async fn probe_device(hdc: &HdcRunner) -> Result<DeviceProbe> {
     })
 }
 
+/// 从 `uitest --version` 输出中提取严格唯一的四段式版本号。
 pub(super) fn extract_four_part_version(output: &str) -> Result<String> {
     let regex = Regex::new(r"\d+\.\d+\.\d+\.\d+").map_err(|_| DriverError::InvalidUitestVersion)?;
     let versions: Vec<_> = regex
@@ -88,6 +97,7 @@ pub(super) fn extract_four_part_version(output: &str) -> Result<String> {
     }
 }
 
+/// 确保设备端 Agent 已部署并运行：校验 SHA-256 → 推送/更新 → 启动 singleness daemon。
 pub(super) async fn ensure_agent(
     hdc: &HdcRunner,
     profile: &AgentProfile,
@@ -193,6 +203,9 @@ async fn remote_agent_matches(hdc: &HdcRunner, profile: &AgentProfile) -> bool {
     marker && size && architecture
 }
 
+/// 建立 Hypium RPC 会话：创建端口转发 → 连接 RPC → 创建远端 Driver 对象。
+///
+/// 内部会重试最多 3 次。
 pub(super) async fn establish_session(
     hdc: &HdcRunner,
     transport: &HarmonyTransport,
@@ -244,6 +257,7 @@ pub(super) async fn establish_session(
     Err(last_error.unwrap_or_else(|| DriverError::Forward("重试次数耗尽".into())))
 }
 
+/// 清理所有已记录的端口转发，返回清理失败的列表。
 pub(super) async fn cleanup_owned_forwards(
     hdc: &HdcRunner,
     owned_forwards: &mut Vec<OwnedForward>,
@@ -308,6 +322,7 @@ impl Drop for ForwardCleanupGuard {
     }
 }
 
+/// 将端口转发清理失败列表合并为单个 [`DriverError::ForwardCleanup`]。
 pub(super) fn forward_cleanup_error(mut issues: Vec<ForwardCleanupIssue>) -> DriverError {
     let additional_failures = issues.len().saturating_sub(1);
     let issue = issues.swap_remove(0);
@@ -401,6 +416,7 @@ async fn daemon_running(hdc: &HdcRunner) -> Result<bool> {
         .is_some())
 }
 
+/// 停止设备端所有 singleness daemon 进程。
 pub(super) async fn stop_singleness_daemon(hdc: &HdcRunner) -> Result<()> {
     let output = hdc.shell("ps -ef").await?;
     let pids: Vec<_> = singleness_pids(&output.stdout).collect();
@@ -410,6 +426,7 @@ pub(super) async fn stop_singleness_daemon(hdc: &HdcRunner) -> Result<()> {
     Ok(())
 }
 
+/// 从 `ps -ef` 输出中筛选出 singleness daemon 的 PID。
 pub(super) fn singleness_pids(output: &str) -> impl Iterator<Item = &str> {
     output.lines().filter_map(|line| {
         if !line.contains("uitest start-daemon singleness") {

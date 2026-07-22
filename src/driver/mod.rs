@@ -45,9 +45,13 @@ fn next_operation_id() -> String {
 /// Driver 的运行时配置。
 #[derive(Clone, Debug)]
 pub struct DriverConfig {
+    /// 单次 RPC 调用的超时时间（默认 20 秒）。
     pub rpc_timeout: Duration,
+    /// RPC 帧的最大字节数（默认 8 MiB）。
     pub max_rpc_frame_size: usize,
+    /// 关闭 Driver 时是否同时杀死设备端的 singleness daemon。
     pub kill_daemon_on_close: bool,
+    /// 批量释放远端引用的队列阈值（默认 20）。
     pub cleaner_batch_size: usize,
 }
 
@@ -72,36 +76,45 @@ pub struct HmDriverBuilder {
 }
 
 impl HmDriverBuilder {
+    /// 设置目标设备选择器。
     pub fn device(mut self, selector: DeviceSelector) -> Self {
         self.selector = selector;
         self
     }
 
+    /// 设置 hdc 可执行文件的路径。
     pub fn hdc_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.hdc.path = Some(path.into());
         self
     }
 
+    /// 设置 hdc server 的地址和端口。
     pub fn hdc_server(mut self, host: impl Into<String>, port: u16) -> Self {
         self.hdc.server = Some((host.into(), port));
         self
     }
 
+    /// 直接使用完整的 HDC 配置。
     pub fn hdc_config(mut self, config: HdcConfig) -> Self {
         self.hdc = config;
         self
     }
 
+    /// 设置 Agent 固件来源（内置或外部路径）。
     pub fn agent_source(mut self, source: AgentSource) -> Self {
         self.agent_source = source;
         self
     }
 
+    /// 设置 Driver 运行时配置。
     pub fn driver_config(mut self, config: DriverConfig) -> Self {
         self.config = config;
         self
     }
 
+    /// 连接设备并建立 Hypium RPC 会话。
+    ///
+    /// 内部流程：发现设备 → 探测架构/版本 → 推送 Agent → 建立端口转发 → 创建远端 Driver。
     pub async fn connect(self) -> Result<HmDriver> {
         let discovery = HdcRunner::new(self.hdc)?;
         let descriptor = discovery.select(&self.selector).await?;
@@ -279,6 +292,7 @@ impl Drop for HmDriverInner {
 }
 
 impl HmDriver {
+    /// 创建一个新的 [`HmDriverBuilder`]。
     pub fn builder() -> HmDriverBuilder {
         HmDriverBuilder::default()
     }
@@ -290,10 +304,12 @@ impl HmDriver {
         HdcRunner::new(config)?.discover().await
     }
 
+    /// 返回当前使用的 Agent 固件信息。
     pub fn agent_profile(&self) -> &AgentProfile {
         &self.inner.profile
     }
 
+    /// 返回当前会话的代际编号，用于区分远端引用归属的会话。
     pub fn generation(&self) -> u64 {
         self.inner.generation.load(Ordering::Acquire)
     }
@@ -308,6 +324,10 @@ impl HmDriver {
             .ok_or(DriverError::SessionInvalid)
     }
 
+    /// 直接调用任意 Hypium RPC API。
+    ///
+    /// `api` 为完整方法名（如 `"Driver.click"`），`this` 为可选的远端对象引用，
+    /// `args` 为 JSON 参数数组。适用于当前能力未覆盖的高级场景。
     pub async fn call_hypium_api(
         &self,
         api: &str,
@@ -338,6 +358,9 @@ impl HmDriver {
         rpc.call(api, this, args).await
     }
 
+    /// 恢复已断开的会话（重新推送 Agent、建立端口转发、创建远端 Driver）。
+    ///
+    /// 调用后会话代际递增，所有之前获取的 [`Element`] 和 [`XPathElement`] 将失效。
     pub async fn recover(&self) -> Result<()> {
         let mut state = self.inner.state.lock().await;
         if state.closed {
@@ -374,6 +397,10 @@ impl HmDriver {
         Ok(())
     }
 
+    /// 主动关闭会话并清理资源。
+    ///
+    /// 释放所有远端引用、移除端口转发，若 [`DriverConfig::kill_daemon_on_close`] 为 `true`
+    /// 还将在设备端停止 singleness daemon。
     pub async fn close(&self) -> Result<()> {
         self.flush_cleaner(true).await?;
         let mut state = self.inner.state.lock().await;

@@ -14,6 +14,7 @@ use tokio::time::{Instant, timeout_at};
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 impl HmDriver {
+    /// 获取当前界面的 UI 树（通过 `uitest dumpLayout`）。
     pub async fn ui_tree(&self) -> Result<UiNode> {
         let directory = tempdir()?;
         let local = directory.path().join("layout.json");
@@ -33,6 +34,7 @@ impl HmDriver {
         result
     }
 
+    /// 使用选择器查找第一个匹配的 UI 元素。
     pub async fn find(&self, selector: &Selector) -> Result<Option<Element>> {
         let index = selector.selected_index();
         let references = self.find_remote_references(selector).await?;
@@ -50,14 +52,17 @@ impl HmDriver {
         }))
     }
 
+    /// 判断选择器是否有匹配的元素。
     pub async fn exists(&self, selector: &Selector) -> Result<bool> {
         Ok(self.find(selector).await?.is_some())
     }
 
+    /// 统计选择器匹配的元素数量。
     pub async fn count(&self, selector: &Selector) -> Result<usize> {
         Ok(self.find_all(selector).await?.len())
     }
 
+    /// 如果元素存在则点击，返回是否点击成功。
     pub async fn click_if_exists(&self, selector: &Selector) -> Result<bool> {
         let Some(element) = self.find(selector).await? else {
             return Ok(false);
@@ -66,6 +71,7 @@ impl HmDriver {
         Ok(true)
     }
 
+    /// 查找所有匹配选择器的 UI 元素。
     pub async fn find_all(&self, selector: &Selector) -> Result<Vec<Element>> {
         let generation = self.generation();
         Ok(self
@@ -79,6 +85,7 @@ impl HmDriver {
             .collect())
     }
 
+    /// 在总超时时间内等待元素出现，超时返回 `Err(ElementNotFound)`。
     pub async fn wait_for(&self, selector: &Selector, timeout: Duration) -> Result<Element> {
         let deadline = Instant::now() + timeout;
         loop {
@@ -172,12 +179,14 @@ impl HmDriver {
         .await
     }
 
+    /// 通过 XPath 表达式查找第一个匹配的 UI 元素，未找到返回 `Err(XPathNotFound)`。
     pub async fn xpath(&self, expression: &str) -> Result<XPathElement> {
         self.xpath_optional(expression)
             .await?
             .ok_or(DriverError::XPathNotFound)
     }
 
+    /// 通过 XPath 表达式查找第一个匹配的 UI 元素，未找到返回 `None`。
     pub async fn xpath_optional(&self, expression: &str) -> Result<Option<XPathElement>> {
         let root = self.ui_tree().await?;
         Ok(XPathElement::query(self.clone(), &root, expression)?
@@ -185,15 +194,18 @@ impl HmDriver {
             .next())
     }
 
+    /// 通过 XPath 表达式查找所有匹配的 UI 元素。
     pub async fn xpath_all(&self, expression: &str) -> Result<Vec<XPathElement>> {
         let root = self.ui_tree().await?;
         XPathElement::query(self.clone(), &root, expression)
     }
 
+    /// 判断 XPath 表达式是否有匹配的元素。
     pub async fn xpath_exists(&self, expression: &str) -> Result<bool> {
         Ok(!self.xpath_all(expression).await?.is_empty())
     }
 
+    /// 如果 XPath 匹配的元素存在则点击，返回是否点击成功。
     pub async fn xpath_click_if_exists(&self, expression: &str) -> Result<bool> {
         let Some(element) = self.xpath_optional(expression).await? else {
             return Ok(false);

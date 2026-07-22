@@ -9,6 +9,7 @@ use serde_json::json;
 use std::net::IpAddr;
 
 impl HmDriver {
+    /// 获取当前显示设备的尺寸（宽度 x 高度，单位为像素）。
     pub async fn display_size(&self) -> Result<DisplaySize> {
         let value = self.driver_call("getDisplaySize", json!([])).await?;
         let width = value
@@ -25,6 +26,7 @@ impl HmDriver {
         }
     }
 
+    /// 获取当前显示旋转角度。
     pub async fn display_rotation(&self) -> Result<DisplayRotation> {
         let value = self.driver_call("getDisplayRotation", json!([])).await?;
         DisplayRotation::try_from(
@@ -34,12 +36,14 @@ impl HmDriver {
         )
     }
 
+    /// 设置当前显示旋转角度（0°/90°/180°/270°）。
     pub async fn set_display_rotation(&self, rotation: DisplayRotation) -> Result<()> {
         self.driver_call("setDisplayRotation", json!([rotation as u8]))
             .await
             .map(|_| ())
     }
 
+    /// 收集完整的设备信息（型号、系统版本、CPU ABI、WLAN IP、显示尺寸与旋转角度等）。
     pub async fn device_info(&self) -> Result<DeviceInfo> {
         let product_name = self
             .parameter("const.product.name")
@@ -79,10 +83,12 @@ impl HmDriver {
         })
     }
 
+    /// 点亮屏幕（通过 `power-shell wakeup`）。
     pub async fn screen_on(&self) -> Result<()> {
         self.inner.hdc.shell("power-shell wakeup").await.map(|_| ())
     }
 
+    /// 熄灭屏幕。仅在屏幕当前为亮屏状态时发送电源键。
     pub async fn screen_off(&self) -> Result<()> {
         if should_toggle_for_screen_off(&self.screen_state().await?)? {
             self.toggle_screen_power().await
@@ -96,6 +102,7 @@ impl HmDriver {
         self.press_key_code(KeyCode::Power).await
     }
 
+    /// 获取当前屏幕电源状态（Awake / Sleep / Inactive）。
     pub async fn screen_state(&self) -> Result<ScreenState> {
         let output = self
             .inner
@@ -105,11 +112,13 @@ impl HmDriver {
         parse_screen_state(&output.stdout)
     }
 
+    /// 获取 WLAN 接口的非回环 IPv4/IPv6 地址。
     pub async fn wlan_ip(&self) -> Result<Option<IpAddr>> {
         let output = self.inner.hdc.shell("ifconfig").await?;
         parse_wlan_ip(&output.stdout)
     }
 
+    /// 解锁屏幕：先亮屏，再从底部向上滑动。
     pub async fn unlock(&self) -> Result<()> {
         self.screen_on().await?;
         let size = self.display_size().await?;
@@ -122,6 +131,7 @@ impl HmDriver {
     }
 }
 
+/// 仅在屏幕为 Awake 时才需要发送电源键关屏。
 pub(super) fn should_toggle_for_screen_off(state: &ScreenState) -> Result<bool> {
     match state {
         ScreenState::Awake => Ok(true),
@@ -132,6 +142,7 @@ pub(super) fn should_toggle_for_screen_off(state: &ScreenState) -> Result<bool> 
     }
 }
 
+/// 从 `hidumper -s PowerManagerService -a -s` 的输出中解析屏幕电源状态。
 pub(super) fn parse_screen_state(output: &str) -> Result<ScreenState> {
     let pattern = Regex::new(r"Current State:\s*([A-Za-z_]+)")
         .map_err(|error| DriverError::Protocol(error.to_string()))?;
@@ -148,6 +159,7 @@ pub(super) fn parse_screen_state(output: &str) -> Result<ScreenState> {
     })
 }
 
+/// 从 `ifconfig` 输出中解析 WLAN 接口的非回环 IP 地址。
 pub(super) fn parse_wlan_ip(output: &str) -> Result<Option<IpAddr>> {
     let address_pattern = Regex::new(r"(?:inet addr:|inet\s+)([0-9A-Fa-f:.]+)")
         .map_err(|error| DriverError::Protocol(error.to_string()))?;

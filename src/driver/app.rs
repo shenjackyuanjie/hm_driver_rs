@@ -9,14 +9,19 @@ use std::path::Path;
 use url::Url;
 
 impl HmDriver {
+    /// 安装应用（通过 HDC 发送 APK/HAP 到设备并安装）。
     pub async fn install_app(&self, package: impl AsRef<Path>) -> Result<()> {
         self.inner.hdc.install(package.as_ref()).await.map(|_| ())
     }
 
+    /// 卸载指定包名的应用。
     pub async fn uninstall_app(&self, bundle: &AppIdentifier) -> Result<()> {
         self.inner.hdc.uninstall(bundle.as_str()).await.map(|_| ())
     }
 
+    /// 启动应用。
+    ///
+    /// 如果不指定 ability，会自动查找应用的 main ability。
     pub async fn start_app(&self, bundle: &AppIdentifier, ability: Option<&str>) -> Result<()> {
         let ability = match ability {
             Some(value) => {
@@ -35,6 +40,7 @@ impl HmDriver {
             .map(|_| ())
     }
 
+    /// 使用系统浏览器或默认方式打开 URL。
     pub async fn open_url(&self, value: &str, mode: OpenUrlMode) -> Result<()> {
         let url = Url::parse(value).map_err(|error| DriverError::InvalidUrl(error.to_string()))?;
         if url.scheme().is_empty() {
@@ -50,6 +56,7 @@ impl HmDriver {
         self.inner.hdc.shell(command).await.map(|_| ())
     }
 
+    /// 强制停止指定应用的进程。
     pub async fn stop_app(&self, bundle: &AppIdentifier) -> Result<()> {
         self.inner
             .hdc
@@ -58,6 +65,7 @@ impl HmDriver {
             .map(|_| ())
     }
 
+    /// 清除指定应用的用户缓存和数据。
     pub async fn clear_app(&self, bundle: &AppIdentifier) -> Result<()> {
         self.inner
             .hdc
@@ -70,6 +78,7 @@ impl HmDriver {
             .map(|_| ())
     }
 
+    /// 查询应用的详细信息，返回 `bm dump` 的 JSON 输出。
     pub async fn app_info(&self, bundle: &AppIdentifier) -> Result<Value> {
         let output = self
             .inner
@@ -85,15 +94,18 @@ impl HmDriver {
         serde_json::from_str(&output.stdout[start..=end]).map_err(DriverError::Json)
     }
 
+    /// 解析应用的 Ability 列表。
     pub async fn app_abilities(&self, bundle: &AppIdentifier) -> Result<Vec<AbilityInfo>> {
         Ok(parse_ability_infos(&self.app_info(bundle).await?))
     }
 
+    /// 查询应用的 main ability 详情。
     pub async fn main_ability_info(&self, bundle: &AppIdentifier) -> Result<Option<AbilityInfo>> {
         let value = self.app_info(bundle).await?;
         Ok(select_main_ability(parse_ability_infos(&value)))
     }
 
+    /// 查询应用的 main ability 名称。
     pub async fn main_ability(&self, bundle: &AppIdentifier) -> Result<Option<String>> {
         let value = self.app_info(bundle).await?;
         let abilities = parse_ability_infos(&value);
@@ -102,6 +114,7 @@ impl HmDriver {
             .or_else(|| find_string_key(&value, "mainAbility")))
     }
 
+    /// 获取当前前台应用。
     pub async fn current_app(&self) -> Result<Option<(AppIdentifier, String)>> {
         let output = self.inner.hdc.shell("aa dump -l").await?;
         let bundle_re = Regex::new(r"bundle name \[([A-Za-z0-9_.]+)\]")
@@ -127,14 +140,34 @@ impl HmDriver {
     }
 }
 
+/// 单引号包裹 shell 参数，并对参数内的单引号做转义。
 pub(super) fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
+/// 从 `bm dump` 的 JSON 值中递归提取所有 Ability 信息。
 pub(super) fn parse_ability_infos(value: &Value) -> Vec<AbilityInfo> {
     let mut result = Vec::new();
     collect_ability_infos(value, None, &mut result);
     result
+}
+
+/// 从 ability 列表中按优先级（launcher > mainEntry > module mainAbility）筛选最佳项。
+pub(super) fn select_main_ability(mut abilities: Vec<AbilityInfo>) -> Option<AbilityInfo> {
+    abilities.sort_by_key(|ability| {
+        let mut score = 0_u8;
+        if ability.module_main_ability.as_deref() == Some(ability.name.as_str()) {
+            score += 1;
+        }
+        if ability.main_module.as_deref() == Some(ability.module_name.as_str()) {
+            score += 1;
+        }
+        (
+            std::cmp::Reverse(ability.is_launcher),
+            std::cmp::Reverse(score),
+        )
+    });
+    abilities.into_iter().next()
 }
 
 fn collect_ability_infos(
@@ -208,23 +241,6 @@ fn is_launcher_ability(value: &Value) -> bool {
         .flatten()
         .filter_map(Value::as_str)
         .any(|action| action == "action.system.home")
-}
-
-pub(super) fn select_main_ability(mut abilities: Vec<AbilityInfo>) -> Option<AbilityInfo> {
-    abilities.sort_by_key(|ability| {
-        let mut score = 0_u8;
-        if ability.module_main_ability.as_deref() == Some(ability.name.as_str()) {
-            score += 1;
-        }
-        if ability.main_module.as_deref() == Some(ability.module_name.as_str()) {
-            score += 1;
-        }
-        (
-            std::cmp::Reverse(ability.is_launcher),
-            std::cmp::Reverse(score),
-        )
-    });
-    abilities.into_iter().next()
 }
 
 fn find_string_key(value: &Value, key: &str) -> Option<String> {

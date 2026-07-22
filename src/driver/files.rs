@@ -8,6 +8,7 @@ use std::path::Path;
 use tempfile::tempdir;
 
 impl HmDriver {
+    /// 将本地文件发送到设备端。
     pub async fn push_file(&self, local: impl AsRef<Path>, remote: &str) -> Result<()> {
         self.inner
             .hdc
@@ -16,6 +17,7 @@ impl HmDriver {
             .map(|_| ())
     }
 
+    /// 从设备端拉取文件到本地。
     pub async fn pull_file(&self, remote: &str, local: impl AsRef<Path>) -> Result<()> {
         self.inner
             .hdc
@@ -29,6 +31,7 @@ impl HmDriver {
         self.inner.hdc.shell(command).await
     }
 
+    /// 列出设备端所有已建立的端口转发规则。
     pub async fn list_forwards(&self) -> Result<Vec<ForwardEntry>> {
         self.inner.hdc.list_forwards().await
     }
@@ -43,10 +46,12 @@ impl HmDriver {
         self.inner.hdc.remove_forward(local_port, remote).await
     }
 
+    /// 截取当前屏幕（自动选择可用方式），返回 JPEG/PNG 字节。
     pub async fn screenshot(&self) -> Result<Vec<u8>> {
         self.screenshot_with_method(ScreenshotMethod::Auto).await
     }
 
+    /// 使用指定的截图方式截取当前屏幕。
     pub async fn screenshot_with_method(&self, method: ScreenshotMethod) -> Result<Vec<u8>> {
         let directory = tempdir()?;
         let local = directory.path().join("screen.bin");
@@ -81,11 +86,13 @@ impl HmDriver {
         }
     }
 
+    /// 截取屏幕并直接保存到本地文件（自动选择截图方式）。
     pub async fn screenshot_to(&self, path: impl AsRef<Path>) -> Result<()> {
         tokio::fs::write(path, self.screenshot().await?).await?;
         Ok(())
     }
 
+    /// 使用指定的截图方式截取屏幕并保存到本地文件。
     pub async fn screenshot_to_with_method(
         &self,
         path: impl AsRef<Path>,
