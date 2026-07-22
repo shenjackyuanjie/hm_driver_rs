@@ -58,6 +58,26 @@ impl UiNode {
         None
     }
 
+    /// 在 UI 树中深度优先搜索所有满足 `predicate` 的节点。
+    pub fn find_all(&self, predicate: impl Fn(&UiNode) -> bool) -> Vec<&UiNode> {
+        let mut result = Vec::new();
+        self.collect_all(&predicate, &mut result);
+        result
+    }
+
+    fn collect_all<'a>(
+        &'a self,
+        predicate: &impl Fn(&UiNode) -> bool,
+        result: &mut Vec<&'a UiNode>,
+    ) {
+        if predicate(self) {
+            result.push(self);
+        }
+        for child in &self.children {
+            child.collect_all(predicate, result);
+        }
+    }
+
     /// 将 `uitest dumpLayout` 的原始 JSON（可能带有 `root` 包装层）解析为 [`UiNode`]。
     ///
     /// 供在不通过 [`crate::HmDriver::ui_tree`] 的情况下（例如自行用 `raw_shell`/
