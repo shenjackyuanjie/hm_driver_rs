@@ -1,7 +1,7 @@
 //! UI 树抓取、选择器查找与 XPath 查询。
 
 use super::{HmDriver, RemoteFileGuard, next_operation_id};
-use crate::selector::{Element, Selector};
+use crate::selector::{Element, MatchPattern, Selector};
 use crate::ui::UiNode;
 use crate::xpath::XPathElement;
 use crate::{DriverError, Result};
@@ -98,6 +98,60 @@ impl HmDriver {
                 Ok(Err(error)) => return Err(error),
                 Err(_) => return Err(DriverError::ElementNotFound),
             }
+        }
+    }
+
+    /// 等待文本内容匹配的节点出现（等于、包含、前缀或后缀）。
+    ///
+    /// 内部使用 [`wait_for_ui`] 轮询 UI 树，超时返回 `Err(ElementNotFound)`。
+    pub async fn wait_for_text(
+        &self,
+        text: &str,
+        pattern: MatchPattern,
+        timeout: Duration,
+    ) -> Result<UiNode> {
+        let owned = text.to_owned();
+        self.wait_for_ui(timeout, move |node| {
+            let actual = node.attribute("text");
+            match &pattern {
+                MatchPattern::Equals(_) => actual.as_deref() == Some(&owned),
+                MatchPattern::Contains(_) => actual.is_some_and(|v| v.contains(&owned)),
+                MatchPattern::StartsWith(_) => actual.is_some_and(|v| v.starts_with(&owned)),
+                MatchPattern::EndsWith(_) => actual.is_some_and(|v| v.ends_with(&owned)),
+            }
+        })
+        .await
+    }
+
+    /// 在超时时间内轮询 UI 树，直到某个节点满足 `predicate`。
+    ///
+    /// 返回第一个匹配的节点。超时返回 `Err(ElementNotFound)`。
+    pub async fn wait_for_ui(
+        &self,
+        timeout: Duration,
+        predicate: impl Fn(&UiNode) -> bool,
+    ) -> Result<UiNode> {
+        self.wait_for_ui_with_interval(timeout, DEFAULT_POLL_INTERVAL, predicate)
+            .await
+    }
+
+    /// 使用指定的轮询间隔等待 UI 节点出现。
+    pub async fn wait_for_ui_with_interval(
+        &self,
+        timeout: Duration,
+        interval: Duration,
+        predicate: impl Fn(&UiNode) -> bool,
+    ) -> Result<UiNode> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if Instant::now() >= deadline {
+                return Err(DriverError::ElementNotFound);
+            }
+            let tree = self.ui_tree().await?;
+            if let Some(node) = tree.find(&predicate) {
+                return Ok(node.clone());
+            }
+            sleep_until_next_poll(deadline, interval).await;
         }
     }
 
