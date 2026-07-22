@@ -108,6 +108,11 @@ impl Element {
             .await
     }
 
+    /// 读取控件的指定属性原始值。
+    ///
+    /// 支持的属性名包括 `id`、`key`、`type`、`text`、`description`、`hint`、
+    /// `selected`、`checked`、`enabled`、`focused`、`checkable`、`clickable`、
+    /// `longClickable`、`scrollable`。
     pub async fn attribute(&self, name: &str) -> Result<Value> {
         let method = match name {
             "id" | "key" => "getId",
@@ -128,72 +133,92 @@ impl Element {
         self.operate(method, json!([])).await
     }
 
+    /// 读取控件的资源 ID。
     pub async fn id(&self) -> Result<String> {
         value_string(self.attribute("id").await?, "id")
     }
 
+    /// 读取控件的键值。
     pub async fn key(&self) -> Result<String> {
         value_string(self.attribute("key").await?, "key")
     }
 
+    /// 读取控件的类型名称。
     pub async fn type_name(&self) -> Result<String> {
         value_string(self.attribute("type").await?, "type")
     }
 
+    /// 读取控件的文本内容。
     pub async fn text(&self) -> Result<String> {
         value_string(self.attribute("text").await?, "text")
     }
 
+    /// 读取控件的描述内容。
     pub async fn description(&self) -> Result<String> {
         value_string(self.attribute("description").await?, "description")
     }
 
+    /// 读取控件的提示文本。
     pub async fn hint(&self) -> Result<String> {
         value_string(self.attribute("hint").await?, "hint")
     }
 
+    /// 判断控件是否已被选中。
     pub async fn is_selected(&self) -> Result<bool> {
         value_bool(self.attribute("selected").await?, "selected")
     }
 
+    /// 判断控件是否已被勾选。
     pub async fn is_checked(&self) -> Result<bool> {
         value_bool(self.attribute("checked").await?, "checked")
     }
 
+    /// 判断控件是否已启用。
     pub async fn is_enabled(&self) -> Result<bool> {
         value_bool(self.attribute("enabled").await?, "enabled")
     }
 
+    /// 判断控件是否已获取焦点。
     pub async fn is_focused(&self) -> Result<bool> {
         value_bool(self.attribute("focused").await?, "focused")
     }
 
+    /// 判断控件是否可被勾选。
     pub async fn is_checkable(&self) -> Result<bool> {
         value_bool(self.attribute("checkable").await?, "checkable")
     }
 
+    /// 判断控件是否可被点击。
     pub async fn is_clickable(&self) -> Result<bool> {
         value_bool(self.attribute("clickable").await?, "clickable")
     }
 
+    /// 判断控件是否可被长按。
     pub async fn is_long_clickable(&self) -> Result<bool> {
         value_bool(self.attribute("longClickable").await?, "longClickable")
     }
 
+    /// 判断控件是否可滚动。
     pub async fn is_scrollable(&self) -> Result<bool> {
         value_bool(self.attribute("scrollable").await?, "scrollable")
     }
 
+    /// 读取控件的边界矩形。
     pub async fn bounds(&self) -> Result<Bounds> {
         let value = self.operate("getBounds", json!([])).await?;
         Bounds::parse_value(&value)
             .ok_or_else(|| DriverError::Protocol("控件 bounds 格式无效".into()))
     }
 
+    /// 读取控件边界矩形的中心点坐标。
     pub async fn bounds_center(&self) -> Result<crate::Point> {
         Ok(self.bounds().await?.center())
     }
 
+    /// 一次性读取控件的全部属性。
+    ///
+    /// 与逐个调用属性方法相比，此方法在一次往返中获取所有信息，
+    /// 但在默认实现中仍然是通过多次 API 调用完成的。
     pub async fn info(&self) -> Result<ElementInfo> {
         let id = self.id().await?;
         let key = self.key().await?;
@@ -230,22 +255,27 @@ impl Element {
         })
     }
 
+    /// 点击控件。
     pub async fn click(&self) -> Result<()> {
         self.operate("click", json!([])).await.map(|_| ())
     }
 
+    /// 双击控件。
     pub async fn double_click(&self) -> Result<()> {
         self.operate("doubleClick", json!([])).await.map(|_| ())
     }
 
+    /// 长按控件。
     pub async fn long_click(&self) -> Result<()> {
         self.operate("longClick", json!([])).await.map(|_| ())
     }
 
+    /// 向控件输入文本。
     pub async fn input_text(&self, text: &str) -> Result<()> {
         self.operate("inputText", json!([text])).await.map(|_| ())
     }
 
+    /// 清除控件中的文本。
     pub async fn clear_text(&self) -> Result<()> {
         self.operate("clearText", json!([])).await.map(|_| ())
     }
@@ -255,6 +285,9 @@ impl Element {
         self.scroll_to_top_with_speed(600).await
     }
 
+    /// 以指定速度滚动到控件顶部。
+    ///
+    /// `speed` 取值范围为 200 到 40000。
     pub async fn scroll_to_top_with_speed(&self, speed: u32) -> Result<()> {
         validate_operation_speed(speed)?;
         self.operate("scrollToTop", json!([speed]))
@@ -267,6 +300,9 @@ impl Element {
         self.scroll_to_bottom_with_speed(600).await
     }
 
+    /// 以指定速度滚动到控件底部。
+    ///
+    /// `speed` 取值范围为 200 到 40000。
     pub async fn scroll_to_bottom_with_speed(&self, speed: u32) -> Result<()> {
         validate_operation_speed(speed)?;
         self.operate("scrollToBottom", json!([speed]))
@@ -321,21 +357,32 @@ impl Element {
         }
     }
 
+    /// 将当前控件拖拽到目标控件位置。
     pub async fn drag_to(&self, target: &Element) -> Result<()> {
         let target = target.reference().await?;
         self.operate("dragTo", json!([target])).await.map(|_| ())
     }
 
+    /// 在控件上执行捏合缩小手势。
+    ///
+    /// `scale` 为缩放比例，必须大于 0。
     pub async fn pinch_in(&self, scale: f64) -> Result<()> {
         validate_scale(scale)?;
         self.operate("pinchIn", json!([scale])).await.map(|_| ())
     }
 
+    /// 在控件上执行捏合放大手势。
+    ///
+    /// `scale` 为缩放比例，必须大于 0。
     pub async fn pinch_out(&self, scale: f64) -> Result<()> {
         validate_scale(scale)?;
         self.operate("pinchOut", json!([scale])).await.map(|_| ())
     }
 
+    /// 等待控件从界面上消失。
+    ///
+    /// 在指定超时时间内不断尝试查找控件，若控件已不存在则返回 `true`，
+    /// 超时后仍未消失则返回 `false`。
     pub async fn wait_until_gone(&self, timeout: Duration) -> Result<bool> {
         let deadline = Instant::now() + timeout;
         loop {

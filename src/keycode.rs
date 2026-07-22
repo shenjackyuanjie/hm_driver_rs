@@ -337,6 +337,7 @@ pub enum KeyCode {
 }
 
 impl KeyCode {
+    /// 返回当前键码的原始整数值。
     pub const fn value(self) -> i32 {
         self as i32
     }

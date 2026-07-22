@@ -11,6 +11,9 @@ pub struct AgentCatalog {
 }
 
 impl AgentCatalog {
+    /// 从编译期嵌入的 JSON 清单中加载官方 Agent catalog。
+    ///
+    /// 同时验证 source_package、source_wheel 以及 Agent 数量是否与预期一致。
     pub fn load() -> Result<Self> {
         let catalog: Self = serde_json::from_str(include_str!("../assets/agents.json"))?;
         if catalog.source_package != "devecotesting-hypium-6.1.0.210.zip"
@@ -28,6 +31,9 @@ impl AgentCatalog {
         Ok(catalog)
     }
 
+    /// 根据版本号与架构在 catalog 中查找对应的 Agent 信息。
+    ///
+    /// 若未找到匹配项则返回 `DriverError::InvalidAgentCatalog`。
     pub fn profile(&self, version: &str, architecture: &str) -> Result<AgentProfile> {
         self.agents
             .iter()

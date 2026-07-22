@@ -29,6 +29,7 @@ pub struct GesturePath {
 }
 
 impl GesturePath {
+    /// 创建一个新的手势路径，从指定位置开始并保持指定时长。
     pub fn new(position: Position, hold: Duration) -> Result<Self> {
         validate_duration(hold)?;
         Ok(Self {
@@ -36,12 +37,14 @@ impl GesturePath {
         })
     }
 
+    /// 在当前路径上添加一个移动到指定位置的步骤，动画持续时长为 `duration`。
     pub fn move_to(mut self, position: Position, duration: Duration) -> Result<Self> {
         validate_duration(duration)?;
         self.steps.push(GestureStep::Move { position, duration });
         Ok(self)
     }
 
+    /// 在当前路径上添加一个暂停步骤，在当前位置保持指定时长。
     pub fn pause(mut self, duration: Duration) -> Result<Self> {
         validate_duration(duration)?;
         self.steps.push(GestureStep::Pause { duration });
@@ -58,6 +61,7 @@ pub struct Gesture {
 }
 
 impl Gesture {
+    /// 创建一个新手势，包含指定的单根手指轨迹。
     pub fn new(path: GesturePath) -> Self {
         Self {
             paths: vec![path],
@@ -66,6 +70,7 @@ impl Gesture {
         }
     }
 
+    /// 为手势添加一根新的手指轨迹，最多支持 10 根手指。
     pub fn add_path(mut self, path: GesturePath) -> Result<Self> {
         if self.paths.len() >= MAX_FINGERS {
             return Err(DriverError::InvalidGesture(format!(
@@ -76,6 +81,7 @@ impl Gesture {
         Ok(self)
     }
 
+    /// 设置手势轨迹的采样间隔（10～100 毫秒）。
     pub fn sample_interval(mut self, interval: Duration) -> Result<Self> {
         let millis = interval.as_millis();
         if !(MIN_SAMPLE_MILLIS..=MAX_SAMPLE_MILLIS).contains(&millis) {
@@ -87,6 +93,7 @@ impl Gesture {
         Ok(self)
     }
 
+    /// 设置手势注入速度（200～40000）。
     pub fn injection_speed(mut self, speed: u32) -> Result<Self> {
         if !(200..=40_000).contains(&speed) {
             return Err(DriverError::InvalidGesture(

@@ -166,18 +166,22 @@ pub struct Bounds {
 }
 
 impl Bounds {
+    /// 返回控件边界的中心点坐标。
     pub const fn center(self) -> Point {
         Point::new((self.left + self.right) / 2, (self.top + self.bottom) / 2)
     }
 
+    /// 检查边界是否有效（right >= left 且 bottom >= top）。
     pub const fn is_valid(self) -> bool {
         self.right >= self.left && self.bottom >= self.top
     }
 
+    /// 返回边界的宽度（right - left）。
     pub const fn width(self) -> i32 {
         self.right - self.left
     }
 
+    /// 返回边界的高度（bottom - top）。
     pub const fn height(self) -> i32 {
         self.bottom - self.top
     }
@@ -423,6 +427,7 @@ impl AppIdentifier {
         }
     }
 
+    /// 返回原始 bundle 标识字符串。
     pub fn as_str(&self) -> &str {
         &self.0
     }

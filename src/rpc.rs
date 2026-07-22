@@ -21,6 +21,7 @@ pub enum ApiDialect {
 }
 
 impl ApiDialect {
+    /// 返回当前方言下驱动类的名称。
     pub fn driver(self) -> &'static str {
         match self {
             Self::Modern => "Driver",
@@ -28,6 +29,7 @@ impl ApiDialect {
         }
     }
 
+    /// 返回当前方言下选择器类的名称。
     pub fn selector(self) -> &'static str {
         match self {
             Self::Modern => "On",
@@ -35,6 +37,7 @@ impl ApiDialect {
         }
     }
 
+    /// 返回当前方言下组件类的名称。
     pub fn component(self) -> &'static str {
         match self {
             Self::Modern => "Component",

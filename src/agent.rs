@@ -81,12 +81,17 @@ pub struct AgentResolver {
 }
 
 impl AgentResolver {
+    /// 加载官方 Agent catalog 并构造一个新的解析器。
     pub fn new() -> Result<Self> {
         Ok(Self {
             catalog: AgentCatalog::load()?,
         })
     }
 
+    /// 根据设备架构与 uitest 版本解析出匹配的 Agent 信息。
+    ///
+    /// `architecture` 会被标准化为 `x86_64` 或 `arm64`；
+    /// `version` 需符合 `X.Y.Z.W` 四段式版本号格式。
     pub fn resolve(&self, architecture: &str, version: &str) -> Result<AgentProfile> {
         let architecture = normalize_architecture(architecture)?;
         let version = version.parse::<UitestVersion>()?;

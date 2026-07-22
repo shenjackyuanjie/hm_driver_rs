@@ -66,72 +66,89 @@ pub struct Selector {
 }
 
 impl Selector {
+    /// 创建一个空的控件选择器。
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// 按控件的 `id` 属性匹配。
     pub fn id(self, pattern: impl Into<MatchPattern>) -> Self {
         self.string("id", pattern.into())
     }
 
+    /// 按控件的 `key` 属性匹配。
     pub fn key(self, pattern: impl Into<MatchPattern>) -> Self {
         self.string("key", pattern.into())
     }
 
+    /// 按控件的文本内容匹配。
     pub fn text(self, pattern: impl Into<MatchPattern>) -> Self {
         self.string("text", pattern.into())
     }
 
+    /// 按控件的类型名称匹配。
     pub fn type_name(self, pattern: impl Into<MatchPattern>) -> Self {
         self.string("type", pattern.into())
     }
 
+    /// 按控件的描述内容匹配。
     pub fn description(self, pattern: impl Into<MatchPattern>) -> Self {
         self.string("description", pattern.into())
     }
 
+    /// 按控件的提示文本匹配。
     pub fn hint(self, pattern: impl Into<MatchPattern>) -> Self {
         self.string("hint", pattern.into())
     }
 
+    /// 按控件的选中状态匹配。
     pub fn selected(self, value: bool) -> Self {
         self.boolean("selected", value)
     }
 
+    /// 按控件的勾选状态匹配。
     pub fn checked(self, value: bool) -> Self {
         self.boolean("checked", value)
     }
 
+    /// 按控件的启用状态匹配。
     pub fn enabled(self, value: bool) -> Self {
         self.boolean("enabled", value)
     }
 
+    /// 按控件的焦点状态匹配。
     pub fn focused(self, value: bool) -> Self {
         self.boolean("focused", value)
     }
 
+    /// 按控件是否可勾选匹配。
     pub fn checkable(self, value: bool) -> Self {
         self.boolean("checkable", value)
     }
 
+    /// 按控件是否可点击匹配。
     pub fn clickable(self, value: bool) -> Self {
         self.boolean("clickable", value)
     }
 
+    /// 按控件是否可长按匹配。
     pub fn long_clickable(self, value: bool) -> Self {
         self.boolean("longClickable", value)
     }
 
+    /// 按控件是否可滚动匹配。
     pub fn scrollable(self, value: bool) -> Self {
         self.boolean("scrollable", value)
     }
 
+    /// 限定目标控件位于另一个控件之前。
     pub fn before(mut self, selector: Selector) -> Self {
         self.conditions
             .push(SelectorCondition::Before(Box::new(selector)));
         self
     }
 
+    /// 限定目标控件位于另一个控件之后。
     pub fn after(mut self, selector: Selector) -> Self {
         self.conditions
             .push(SelectorCondition::After(Box::new(selector)));
@@ -152,6 +169,7 @@ impl Selector {
         self
     }
 
+    /// 设置目标控件在同级匹配结果中的索引（从 0 开始）。
     pub fn index(mut self, index: usize) -> Self {
         self.index = index;
         self

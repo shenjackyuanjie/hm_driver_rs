@@ -82,30 +82,37 @@ impl XPathElement {
         &self.attributes
     }
 
+    /// 返回查询时保存的控件边界，若节点不可交互则返回 `None`。
     pub fn bounds(&self) -> Option<Bounds> {
         self.bounds
     }
 
+    /// 返回控件边界中心点的绝对坐标，若节点不可交互则返回 `None`。
     pub fn center(&self) -> Option<crate::Point> {
         self.bounds.map(Bounds::center)
     }
 
+    /// 返回控件的 `text` 属性值。
     pub fn text(&self) -> Option<&str> {
         self.attribute("text")
     }
 
+    /// 点击该控件的中心位置。
     pub async fn click(&self) -> Result<()> {
         self.driver.click(self.required_center()?).await
     }
 
+    /// 双击该控件的中心位置。
     pub async fn double_click(&self) -> Result<()> {
         self.driver.double_click(self.required_center()?).await
     }
 
+    /// 长按该控件的中心位置。
     pub async fn long_click(&self) -> Result<()> {
         self.driver.long_click(self.required_center()?).await
     }
 
+    /// 点击该控件并输入指定文本。
     pub async fn input_text(&self, text: &str) -> Result<()> {
         self.click().await?;
         self.driver.input_text(text).await
