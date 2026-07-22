@@ -7,12 +7,14 @@ use crate::types::{Point, Position, SwipeArea, SwipeDirection};
 use crate::{DriverError, Result};
 use serde_json::json;
 use std::time::Duration;
+use tracing::{debug, trace};
 
 impl HmDriver {
     /// 通过按键码（原始值）发送按键事件。
     ///
     /// 按键码范围 0–3200；需要类型安全的按键码请使用 [`press_key_code`] 或 [`KeyCode`]。
     pub async fn press_key(&self, key_code: u32) -> Result<()> {
+        trace!(target: "hm_driver_rs::input", key_code, "按键事件");
         if key_code > 3200 {
             return Err(DriverError::InvalidCoordinate("按键码超过 3200".into()));
         }
@@ -35,6 +37,7 @@ impl HmDriver {
 
     /// 通过 [`KeyCode`] 枚举发送按键事件。
     pub async fn press_key_code(&self, key_code: KeyCode) -> Result<()> {
+        trace!(target: "hm_driver_rs::input", key = %key_code.value(), "按键(KeyCode)");
         self.send_key_code(key_code.value()).await
     }
 
@@ -53,16 +56,19 @@ impl HmDriver {
 
     /// 发送返回键。
     pub async fn go_back(&self) -> Result<()> {
+        trace!(target: "hm_driver_rs::input", "返回键");
         self.press_key_code(KeyCode::Back).await
     }
 
     /// 发送主页键。
     pub async fn go_home(&self) -> Result<()> {
+        trace!(target: "hm_driver_rs::input", "主页键");
         self.press_key_code(KeyCode::Home).await
     }
 
     /// 在指定绝对坐标处点击。
     pub async fn click(&self, point: Point) -> Result<()> {
+        trace!(target: "hm_driver_rs::input", x = point.x, y = point.y, "点击");
         self.coordinate_call("click", json!([point.x, point.y]))
             .await
     }
@@ -74,6 +80,7 @@ impl HmDriver {
 
     /// 在指定绝对坐标处双击。
     pub async fn double_click(&self, point: Point) -> Result<()> {
+        trace!(target: "hm_driver_rs::input", x = point.x, y = point.y, "双击");
         self.coordinate_call("doubleClick", json!([point.x, point.y]))
             .await
     }
@@ -86,6 +93,7 @@ impl HmDriver {
 
     /// 在指定绝对坐标处长按。
     pub async fn long_click(&self, point: Point) -> Result<()> {
+        trace!(target: "hm_driver_rs::input", x = point.x, y = point.y, "长按");
         self.coordinate_call("longClick", json!([point.x, point.y]))
             .await
     }
@@ -98,6 +106,7 @@ impl HmDriver {
 
     /// 从起点滑动到终点，`speed` 为滑动速度（200–40000 像素/秒）。
     pub async fn swipe(&self, from: Point, to: Point, speed: u32) -> Result<()> {
+        trace!(target: "hm_driver_rs::input", from = %format!("({},{})", from.x, from.y), to = %format!("({},{})", to.x, to.y), speed, "滑动");
         if !(200..=40_000).contains(&speed) {
             return Err(DriverError::InvalidCoordinate(
                 "滑动速度必须位于 200 到 40000".into(),
@@ -116,6 +125,7 @@ impl HmDriver {
 
     /// 从一个绝对坐标拖拽到另一个绝对坐标。
     pub async fn drag(&self, from: Point, to: Point, speed: u32) -> Result<()> {
+        trace!(target: "hm_driver_rs::input", from = %format!("({},{})", from.x, from.y), to = %format!("({},{})", to.x, to.y), speed, "拖拽");
         validate_motion_speed(speed)?;
         self.driver_call("drag", json!([from.x, from.y, to.x, to.y, speed]))
             .await
@@ -195,6 +205,7 @@ impl HmDriver {
 
     /// 执行一个多指手势轨迹。
     pub async fn perform_gesture(&self, gesture: &Gesture) -> Result<()> {
+        debug!(target: "hm_driver_rs::input", "执行手势");
         let matrix = gesture.compile(self.display_size().await?)?;
         let total_points = matrix.first().map(Vec::len).unwrap_or_default();
         let reference = self
@@ -236,12 +247,14 @@ impl HmDriver {
 
     /// 输入文本到当前焦点控件。
     pub async fn input_text(&self, text: &str) -> Result<()> {
+        trace!(target: "hm_driver_rs::input", text, "输入文本");
         self.coordinate_call("inputText", json!([{"x": 1, "y": 1}, text]))
             .await
     }
 
     /// 等待 UI 连续空闲指定时长，最长等待 `timeout`。
     pub async fn wait_for_idle(&self, idle_time: Duration, timeout: Duration) -> Result<()> {
+        trace!(target: "hm_driver_rs::input", ?idle_time, ?timeout, "等待 UI 空闲");
         let idle_millis = duration_millis(idle_time, "UI 空闲时长")?;
         let timeout_millis = duration_millis(timeout, "UI 空闲等待超时")?;
         let rpc_timeout = timeout

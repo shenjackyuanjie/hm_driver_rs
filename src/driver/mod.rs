@@ -30,6 +30,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
+use tracing::{debug, info, trace, warn};
 
 static OPERATION_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -120,6 +121,7 @@ impl HmDriverBuilder {
     ///
     /// 内部流程：发现设备 → 探测架构/版本 → 推送 Agent → 建立端口转发 → 创建远端 Driver。
     pub async fn connect(self) -> Result<HmDriver> {
+        info!(target: "hm_driver_rs::driver", "开始连接设备");
         let discovery = HdcRunner::new(self.hdc)?;
         let descriptor = discovery.select(&self.selector).await?;
         let hdc = discovery.with_serial(descriptor.serial.clone());
@@ -138,6 +140,7 @@ impl HmDriverBuilder {
         let session =
             session::establish_session(&hdc, &profile.transport, &self.config, probe.api_level)
                 .await?;
+        info!(target: "hm_driver_rs::driver", "设备连接成功");
         Ok(HmDriver {
             inner: Arc::new(HmDriverInner {
                 hdc,
@@ -241,6 +244,7 @@ pub(super) fn spawn_cleanup<F>(future: F)
 where
     F: Future<Output = ()> + Send + 'static,
 {
+    debug!(target: "hm_driver_rs::driver", "生成后台清理任务");
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
         handle.spawn(future);
     } else {
@@ -259,6 +263,7 @@ where
 
 impl Drop for HmDriverInner {
     fn drop(&mut self) {
+        debug!(target: "hm_driver_rs::driver", "HmDriverInner 释放");
         let Ok(mut state) = self.state.try_lock() else {
             tracing::warn!(target: "hm_driver_rs::cleanup", "Driver 释放时会话仍被占用，无法执行兜底清理");
             return;
@@ -347,11 +352,13 @@ impl HmDriver {
         this: Option<&str>,
         args: Value,
     ) -> Result<Value> {
+        trace!(target: "hm_driver_rs::driver", api, ?this, "调用原始 API");
         self.flush_cleaner(false).await?;
         self.call_direct(api, this, args).await
     }
 
     async fn call_direct(&self, api: &str, this: Option<&str>, args: Value) -> Result<Value> {
+        trace!(target: "hm_driver_rs::driver", api, ?this, "直接调用 API");
         let rpc = {
             let state = self.inner.state.lock().await;
             if state.closed {
@@ -366,6 +373,7 @@ impl HmDriver {
     ///
     /// 调用后会话代际递增，所有之前获取的 [`Element`] 和 [`XPathElement`] 将失效。
     pub async fn recover(&self) -> Result<()> {
+        warn!(target: "hm_driver_rs::driver", "开始恢复会话");
         let mut state = self.inner.state.lock().await;
         if state.closed {
             return Err(DriverError::DriverClosed);
@@ -398,6 +406,7 @@ impl HmDriver {
         self.inner
             .generation
             .store(state.generation, Ordering::Release);
+        info!(target: "hm_driver_rs::driver", "会话恢复成功");
         Ok(())
     }
 
@@ -406,6 +415,7 @@ impl HmDriver {
     /// 释放所有远端引用、移除端口转发，若 [`DriverConfig::kill_daemon_on_close`] 为 `true`
     /// 还将在设备端停止 singleness daemon。
     pub async fn close(&self) -> Result<()> {
+        debug!(target: "hm_driver_rs::driver", "关闭会话");
         self.flush_cleaner(true).await?;
         let mut state = self.inner.state.lock().await;
         if state.closed {
@@ -476,6 +486,7 @@ impl HmDriver {
     }
 
     async fn driver_call(&self, method: &str, args: Value) -> Result<Value> {
+        trace!(target: "hm_driver_rs::driver", method, "Driver API 调用");
         let (dialect, reference) = {
             let state = self.inner.state.lock().await;
             (
@@ -500,6 +511,7 @@ impl HmDriver {
         args: Value,
         timeout: Duration,
     ) -> Result<Value> {
+        trace!(target: "hm_driver_rs::driver", method, ?timeout, "Driver API 调用（带超时）");
         self.flush_cleaner(false).await?;
         let (rpc, dialect, reference) = {
             let state = self.inner.state.lock().await;

@@ -10,12 +10,14 @@ use std::future::Future;
 use std::time::Duration;
 use tempfile::tempdir;
 use tokio::time::{Instant, timeout_at};
+use tracing::{debug, trace};
 
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 impl HmDriver {
     /// 获取当前界面的 UI 树（通过 `uitest dumpLayout`）。
     pub async fn ui_tree(&self) -> Result<UiNode> {
+        debug!(target: "hm_driver_rs::query", "获取 UI 树");
         let directory = tempdir()?;
         let local = directory.path().join("layout.json");
         let remote = format!("/data/local/tmp/hm_driver_{}.json", next_operation_id());
@@ -36,6 +38,7 @@ impl HmDriver {
 
     /// 使用选择器查找第一个匹配的 UI 元素。
     pub async fn find(&self, selector: &Selector) -> Result<Option<Element>> {
+        trace!(target: "hm_driver_rs::query", ?selector, "查找元素");
         let index = selector.selected_index();
         let references = self.find_remote_references(selector).await?;
         let generation = self.generation();
@@ -73,6 +76,7 @@ impl HmDriver {
 
     /// 查找所有匹配选择器的 UI 元素。
     pub async fn find_all(&self, selector: &Selector) -> Result<Vec<Element>> {
+        trace!(target: "hm_driver_rs::query", ?selector, "查找所有元素");
         let generation = self.generation();
         Ok(self
             .find_remote_references(selector)
@@ -87,6 +91,7 @@ impl HmDriver {
 
     /// 在总超时时间内等待元素出现，超时返回 `Err(ElementNotFound)`。
     pub async fn wait_for(&self, selector: &Selector, timeout: Duration) -> Result<Element> {
+        debug!(target: "hm_driver_rs::query", ?selector, ?timeout, "wait_for");
         let deadline = Instant::now() + timeout;
         loop {
             if Instant::now() >= deadline {
@@ -110,6 +115,7 @@ impl HmDriver {
         pattern: MatchPattern,
         timeout: Duration,
     ) -> Result<UiNode> {
+        debug!(target: "hm_driver_rs::query", text, ?pattern, ?timeout, "wait_for_text");
         let owned = text.to_owned();
         self.wait_for_ui(timeout, move |node| {
             let actual = node.attribute("text");
@@ -131,6 +137,7 @@ impl HmDriver {
         timeout: Duration,
         predicate: impl Fn(&UiNode) -> bool,
     ) -> Result<UiNode> {
+        debug!(target: "hm_driver_rs::query", ?timeout, "wait_for_ui");
         self.wait_for_ui_with_interval(timeout, DEFAULT_POLL_INTERVAL, predicate)
             .await
     }
@@ -235,6 +242,7 @@ impl HmDriver {
 
     /// 通过 XPath 表达式查找第一个匹配的 UI 元素，未找到返回 `Err(XPathNotFound)`。
     pub async fn xpath(&self, expression: &str) -> Result<XPathElement> {
+        trace!(target: "hm_driver_rs::query", expression, "XPath 查询");
         self.xpath_optional(expression)
             .await?
             .ok_or(DriverError::XPathNotFound)
@@ -250,6 +258,7 @@ impl HmDriver {
 
     /// 通过 XPath 表达式查找所有匹配的 UI 元素。
     pub async fn xpath_all(&self, expression: &str) -> Result<Vec<XPathElement>> {
+        trace!(target: "hm_driver_rs::query", expression, "XPath 查询所有");
         let root = self.ui_tree().await?;
         XPathElement::query(self.clone(), &root, expression)
     }
@@ -269,6 +278,7 @@ impl HmDriver {
     }
 
     pub(crate) async fn find_remote_references(&self, selector: &Selector) -> Result<Vec<String>> {
+        trace!(target: "hm_driver_rs::query", ?selector, "查找远端引用");
         let selector_reference = selector.build_remote(self).await?;
         let dialect = self.dialect().await?;
         let driver_reference = {

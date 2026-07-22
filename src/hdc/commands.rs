@@ -6,9 +6,11 @@ use crate::{DriverError, Result};
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
 use std::time::Duration;
+use tracing::{debug, trace};
 
 impl HdcRunner {
     pub async fn discover(&self) -> Result<Vec<DeviceDescriptor>> {
+        debug!(target: "hm_driver_rs::hdc::commands", "发现设备");
         let output = self
             .run(["list", "targets", "-v"], self.inner.config.command_timeout)
             .await?;
@@ -16,6 +18,7 @@ impl HdcRunner {
     }
 
     pub async fn select(&self, selector: &DeviceSelector) -> Result<DeviceDescriptor> {
+        debug!(target: "hm_driver_rs::hdc::commands", ?selector, "选择设备");
         let devices = self.discover().await?;
         let online: Vec<_> = devices
             .into_iter()
@@ -35,6 +38,7 @@ impl HdcRunner {
     }
 
     pub async fn shell(&self, command: impl AsRef<OsStr>) -> Result<CommandOutput> {
+        trace!(target: "hm_driver_rs::hdc::commands", command = %command.as_ref().to_string_lossy(), "Shell 命令");
         self.run(
             [OsString::from("shell"), command.as_ref().to_owned()],
             self.inner.config.command_timeout,
@@ -55,6 +59,7 @@ impl HdcRunner {
     }
 
     pub async fn send_file(&self, local: &Path, remote: &str) -> Result<CommandOutput> {
+        debug!(target: "hm_driver_rs::hdc::commands", local = %local.display(), remote, "发送文件");
         self.run(
             [
                 OsString::from("file"),
@@ -68,6 +73,7 @@ impl HdcRunner {
     }
 
     pub async fn receive_file(&self, remote: &str, local: &Path) -> Result<CommandOutput> {
+        debug!(target: "hm_driver_rs::hdc::commands", remote, local = %local.display(), "接收文件");
         self.run(
             [
                 OsString::from("file"),
@@ -81,6 +87,7 @@ impl HdcRunner {
     }
 
     pub async fn install(&self, package: &Path) -> Result<CommandOutput> {
+        debug!(target: "hm_driver_rs::hdc::commands", package = %package.display(), "安装");
         self.run(
             [OsString::from("install"), package.as_os_str().to_owned()],
             self.inner.config.transfer_timeout,
@@ -89,6 +96,7 @@ impl HdcRunner {
     }
 
     pub async fn uninstall(&self, bundle: &str) -> Result<CommandOutput> {
+        debug!(target: "hm_driver_rs::hdc::commands", bundle, "uninstall");
         self.run(
             [OsString::from("uninstall"), OsString::from(bundle)],
             self.inner.config.transfer_timeout,
@@ -97,6 +105,7 @@ impl HdcRunner {
     }
 
     pub async fn forward(&self, local_port: u16, remote: &str) -> Result<()> {
+        trace!(target: "hm_driver_rs::hdc::commands", local_port, remote, "端口转发");
         self.run(
             [
                 OsString::from("fport"),
@@ -111,6 +120,7 @@ impl HdcRunner {
     }
 
     pub async fn remove_forward(&self, local_port: u16, remote: &str) -> Result<()> {
+        trace!(target: "hm_driver_rs::hdc::commands", local_port, remote, "移除端口转发");
         let remote_endpoint = super::parse::parse_forward_endpoint(remote)?;
         if !self.forward_exists(local_port, &remote_endpoint).await? {
             return Ok(());

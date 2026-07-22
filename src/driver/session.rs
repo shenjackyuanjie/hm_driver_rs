@@ -13,6 +13,7 @@ use std::path::Path;
 use std::time::Duration;
 use tempfile::tempdir;
 use tokio::net::TcpListener;
+use tracing::{debug, info, trace, warn};
 
 /// 成功建立 RPC 会话后的全部上下文。
 pub(super) struct EstablishedSession {
@@ -53,6 +54,7 @@ pub(super) struct DeviceProbe {
 
 /// 探测设备端架构、uitest 版本与 API Level。
 pub(super) async fn probe_device(hdc: &HdcRunner) -> Result<DeviceProbe> {
+    info!(target: "hm_driver_rs::session", "探测设备架构和版本");
     let file = hdc.shell("file /system/bin/uitest").await?;
     let architecture = if file.stdout.to_ascii_lowercase().contains("x86-64")
         || file.stdout.to_ascii_lowercase().contains("x86_64")
@@ -74,6 +76,7 @@ pub(super) async fn probe_device(hdc: &HdcRunner) -> Result<DeviceProbe> {
         Ok(output) => output.stdout.trim().parse().ok(),
         Err(_) => None,
     };
+    info!(target: "hm_driver_rs::session", %architecture, %uitest_version, api_level, "设备探测完成");
     Ok(DeviceProbe {
         architecture,
         uitest_version,
@@ -109,10 +112,13 @@ pub(super) async fn ensure_agent(
     profile: &AgentProfile,
     local: &Path,
 ) -> Result<()> {
+    info!(target: "hm_driver_rs::session", agent_version = %profile.version, "部署/启动 Agent");
     if remote_agent_matches(hdc, profile).await {
         if daemon_running(hdc).await.unwrap_or(false) {
+            info!(target: "hm_driver_rs::session", "Agent 已就绪，跳过部署");
             return Ok(());
         }
+        info!(target: "hm_driver_rs::session", "Agent 文件匹配但 daemon 未运行，重新启动");
     } else {
         stop_singleness_daemon(hdc).await?;
         let temporary = format!("/data/local/tmp/.hm_driver_{}.so", next_operation_id());
@@ -142,6 +148,7 @@ pub(super) async fn ensure_agent(
         .await?;
         temporary_guard.disarm();
     }
+    info!(target: "hm_driver_rs::session", "启动 singleness daemon");
     hdc.shell_timeout("uitest start-daemon singleness", hdc.agent_timeout())
         .await?;
     let deadline = tokio::time::Instant::now() + hdc.agent_timeout();
@@ -218,6 +225,7 @@ pub(super) async fn establish_session(
     config: &DriverConfig,
     api_level: Option<u32>,
 ) -> Result<EstablishedSession> {
+    info!(target: "hm_driver_rs::session", "建立 RPC 会话");
     let remote = transport_endpoint(transport);
     let mut last_error = None;
     let mut owned_forwards = ForwardCleanupGuard::new(hdc.clone(), Vec::new());
@@ -244,6 +252,7 @@ pub(super) async fn establish_session(
         }
         match connect_and_create(port, config, api_level).await {
             Ok((rpc, dialect, driver_reference)) => {
+                info!(target: "hm_driver_rs::session", "RPC 会话建立成功");
                 return Ok(EstablishedSession {
                     rpc,
                     dialect,
@@ -252,6 +261,7 @@ pub(super) async fn establish_session(
                 });
             }
             Err(error) => {
+                warn!(target: "hm_driver_rs::session", error = %error, "RPC 会话建立重试");
                 let cleanup_issues = cleanup_guard_forwards(&mut owned_forwards).await;
                 if !cleanup_issues.is_empty() {
                     return Err(forward_cleanup_after_operation(error, cleanup_issues));
@@ -268,6 +278,7 @@ pub(super) async fn cleanup_owned_forwards(
     hdc: &HdcRunner,
     owned_forwards: &mut Vec<OwnedForward>,
 ) -> Vec<ForwardCleanupIssue> {
+    debug!(target: "hm_driver_rs::session", "清理端口转发");
     let mut guard = ForwardCleanupGuard::new(hdc.clone(), std::mem::take(owned_forwards));
     let issues = cleanup_guard_forwards(&mut guard).await;
     *owned_forwards = guard.take();
@@ -417,6 +428,7 @@ fn is_method_not_found(message: &str) -> bool {
 }
 
 async fn daemon_running(hdc: &HdcRunner) -> Result<bool> {
+    trace!(target: "hm_driver_rs::session", "检查 daemon 运行状态");
     Ok(singleness_pids(&hdc.shell("ps -ef").await?.stdout)
         .next()
         .is_some())
@@ -424,6 +436,7 @@ async fn daemon_running(hdc: &HdcRunner) -> Result<bool> {
 
 /// 停止设备端所有 singleness daemon 进程。
 pub(super) async fn stop_singleness_daemon(hdc: &HdcRunner) -> Result<()> {
+    debug!(target: "hm_driver_rs::session", "停止 singleness daemon");
     let output = hdc.shell("ps -ef").await?;
     let pids: Vec<_> = singleness_pids(&output.stdout).collect();
     for pid in pids {

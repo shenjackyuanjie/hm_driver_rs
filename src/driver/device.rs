@@ -7,6 +7,7 @@ use crate::{DriverError, Result};
 use regex::Regex;
 use serde_json::json;
 use std::net::IpAddr;
+use tracing::{debug, trace};
 
 impl HmDriver {
     /// 获取当前显示设备的尺寸（宽度 x 高度，单位为像素）。
@@ -20,20 +21,24 @@ impl HmDriver {
             .get("y")
             .and_then(serde_json::Value::as_u64)
             .and_then(|v| u32::try_from(v).ok());
-        match (width, height) {
+        let result = match (width, height) {
             (Some(width), Some(height)) => Ok(DisplaySize { width, height }),
             _ => Err(DriverError::Protocol("显示尺寸响应无效".into())),
-        }
+        };
+        trace!(target: "hm_driver_rs::device", ?result, "display_size");
+        result
     }
 
     /// 获取当前显示旋转角度。
     pub async fn display_rotation(&self) -> Result<DisplayRotation> {
         let value = self.driver_call("getDisplayRotation", json!([])).await?;
-        DisplayRotation::try_from(
+        let result = DisplayRotation::try_from(
             value
                 .as_u64()
                 .ok_or_else(|| DriverError::Protocol("显示旋转响应无效".into()))?,
-        )
+        );
+        trace!(target: "hm_driver_rs::device", ?result, "display_rotation");
+        result
     }
 
     /// 设置当前显示旋转角度（0°/90°/180°/270°）。
@@ -45,6 +50,7 @@ impl HmDriver {
 
     /// 收集完整的设备信息（型号、系统版本、CPU ABI、WLAN IP、显示尺寸与旋转角度等）。
     pub async fn device_info(&self) -> Result<DeviceInfo> {
+        debug!(target: "hm_driver_rs::device", "收集设备信息");
         let product_name = self
             .parameter("const.product.name")
             .await
@@ -85,11 +91,13 @@ impl HmDriver {
 
     /// 点亮屏幕（通过 `power-shell wakeup`）。
     pub async fn screen_on(&self) -> Result<()> {
+        debug!(target: "hm_driver_rs::device", "点亮屏幕");
         self.inner.hdc.shell("power-shell wakeup").await.map(|_| ())
     }
 
     /// 熄灭屏幕。仅在屏幕当前为亮屏状态时发送电源键。
     pub async fn screen_off(&self) -> Result<()> {
+        debug!(target: "hm_driver_rs::device", "熄灭屏幕");
         if should_toggle_for_screen_off(&self.screen_state().await?)? {
             self.toggle_screen_power().await
         } else {
@@ -114,12 +122,14 @@ impl HmDriver {
 
     /// 获取 WLAN 接口的非回环 IPv4/IPv6 地址。
     pub async fn wlan_ip(&self) -> Result<Option<IpAddr>> {
+        trace!(target: "hm_driver_rs::device", "获取 WLAN IP");
         let output = self.inner.hdc.shell("ifconfig").await?;
         parse_wlan_ip(&output.stdout)
     }
 
     /// 解锁屏幕：先亮屏，再从底部向上滑动。
     pub async fn unlock(&self) -> Result<()> {
+        debug!(target: "hm_driver_rs::device", "解锁屏幕");
         self.screen_on().await?;
         let size = self.display_size().await?;
         self.swipe(

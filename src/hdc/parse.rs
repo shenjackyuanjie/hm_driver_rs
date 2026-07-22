@@ -4,6 +4,7 @@ use crate::types::{DeviceDescriptor, DeviceSerial, DeviceStatus, ForwardEndpoint
 use crate::{DriverError, Result};
 use std::env;
 use std::path::{Path, PathBuf};
+use tracing::trace;
 
 pub(super) fn resolve_hdc_path(explicit: Option<&Path>) -> Result<PathBuf> {
     if let Some(path) = explicit {
@@ -66,6 +67,7 @@ pub(super) fn validate_server((host, port): (String, u16)) -> Result<(String, u1
 }
 
 pub(super) fn parse_devices(output: &str) -> Result<Vec<DeviceDescriptor>> {
+    trace!(target: "hm_driver_rs::hdc::parse", "解析设备列表");
     let mut devices = Vec::new();
     for line in output
         .lines()
@@ -109,6 +111,7 @@ pub(super) fn parse_devices(output: &str) -> Result<Vec<DeviceDescriptor>> {
 }
 
 pub(super) fn parse_forwards(output: &str) -> Result<Vec<ForwardEntry>> {
+    trace!(target: "hm_driver_rs::hdc::parse", "解析端口转发列表");
     let endpoint =
         regex::Regex::new(r"^(?:tcp|localabstract|localreserved|localfilesystem|dev|jdwp):\S+$")
             .map_err(|error| DriverError::Protocol(error.to_string()))?;
@@ -129,6 +132,7 @@ pub(super) fn parse_forwards(output: &str) -> Result<Vec<ForwardEntry>> {
 }
 
 pub(super) fn parse_forward_endpoint(value: &str) -> Result<ForwardEndpoint> {
+    trace!(target: "hm_driver_rs::hdc::parse", value, "解析转发端点");
     if let Some(port) = value.strip_prefix("tcp:") {
         return port
             .parse::<u16>()

@@ -7,15 +7,18 @@ use regex::Regex;
 use serde_json::Value;
 use std::path::Path;
 use url::Url;
+use tracing::{debug, info, trace};
 
 impl HmDriver {
     /// 安装应用（通过 HDC 发送 APK/HAP 到设备并安装）。
     pub async fn install_app(&self, package: impl AsRef<Path>) -> Result<()> {
+        debug!(target: "hm_driver_rs::app", package = %package.as_ref().display(), "安装应用");
         self.inner.hdc.install(package.as_ref()).await.map(|_| ())
     }
 
     /// 卸载指定包名的应用。
     pub async fn uninstall_app(&self, bundle: &AppIdentifier) -> Result<()> {
+        debug!(target: "hm_driver_rs::app", bundle = %bundle.as_str(), "卸载应用");
         self.inner.hdc.uninstall(bundle.as_str()).await.map(|_| ())
     }
 
@@ -23,6 +26,7 @@ impl HmDriver {
     ///
     /// 如果不指定 ability，会自动查找应用的 main ability。
     pub async fn start_app(&self, bundle: &AppIdentifier, ability: Option<&str>) -> Result<()> {
+        info!(target: "hm_driver_rs::app", bundle = %bundle.as_str(), ability = ?ability, "启动应用");
         let ability = match ability {
             Some(value) => {
                 validate_ability(value)?;
@@ -42,6 +46,7 @@ impl HmDriver {
 
     /// 使用系统浏览器或默认方式打开 URL。
     pub async fn open_url(&self, value: &str, mode: OpenUrlMode) -> Result<()> {
+        debug!(target: "hm_driver_rs::app", url = %value, ?mode, "打开 URL");
         let url = Url::parse(value).map_err(|error| DriverError::InvalidUrl(error.to_string()))?;
         if url.scheme().is_empty() {
             return Err(DriverError::InvalidUrl("URL 缺少 scheme".into()));
@@ -58,6 +63,7 @@ impl HmDriver {
 
     /// 强制停止指定应用的进程。
     pub async fn stop_app(&self, bundle: &AppIdentifier) -> Result<()> {
+        debug!(target: "hm_driver_rs::app", bundle = %bundle.as_str(), "停止应用");
         self.inner
             .hdc
             .shell(format!("aa force-stop {}", bundle.as_str()))
@@ -67,6 +73,7 @@ impl HmDriver {
 
     /// 清除指定应用的用户缓存和数据。
     pub async fn clear_app(&self, bundle: &AppIdentifier) -> Result<()> {
+        debug!(target: "hm_driver_rs::app", bundle = %bundle.as_str(), "清除应用数据");
         self.inner
             .hdc
             .shell(format!("bm clean -n {} -c", bundle.as_str()))
@@ -116,6 +123,7 @@ impl HmDriver {
 
     /// 获取当前前台应用。
     pub async fn current_app(&self) -> Result<Option<(AppIdentifier, String)>> {
+        trace!(target: "hm_driver_rs::app", "获取当前前台应用");
         let output = self.inner.hdc.shell("aa dump -l").await?;
         let bundle_re = Regex::new(r"bundle name \[([A-Za-z0-9_.]+)\]")
             .map_err(|error| DriverError::Protocol(error.to_string()))?;

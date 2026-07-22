@@ -6,10 +6,12 @@ use crate::types::{ForwardEntry, ScreenshotMethod};
 use crate::{DriverError, Result};
 use std::path::Path;
 use tempfile::tempdir;
+use tracing::{debug, trace};
 
 impl HmDriver {
     /// 将本地文件发送到设备端。
     pub async fn push_file(&self, local: impl AsRef<Path>, remote: &str) -> Result<()> {
+        debug!(target: "hm_driver_rs::files", local = %local.as_ref().display(), remote, "推送文件");
         self.inner
             .hdc
             .send_file(local.as_ref(), remote)
@@ -19,6 +21,7 @@ impl HmDriver {
 
     /// 从设备端拉取文件到本地。
     pub async fn pull_file(&self, remote: &str, local: impl AsRef<Path>) -> Result<()> {
+        debug!(target: "hm_driver_rs::files", remote, local = %local.as_ref().display(), "拉取文件");
         self.inner
             .hdc
             .receive_file(remote, local.as_ref())
@@ -28,6 +31,7 @@ impl HmDriver {
 
     /// 显式执行设备端 shell。字符串不会交给主机 shell。
     pub async fn raw_shell(&self, command: &str) -> Result<CommandOutput> {
+        trace!(target: "hm_driver_rs::files", command, "原始 Shell 命令");
         self.inner.hdc.shell(command).await
     }
 
@@ -48,6 +52,7 @@ impl HmDriver {
 
     /// 截取当前屏幕（自动选择可用方式），返回 JPEG/PNG 字节。
     pub async fn screenshot(&self) -> Result<Vec<u8>> {
+        debug!(target: "hm_driver_rs::files", "截取屏幕");
         self.screenshot_with_method(ScreenshotMethod::Auto).await
     }
 
@@ -108,6 +113,7 @@ impl HmDriver {
         local: &Path,
         method: ScreenshotMethod,
     ) -> Result<Vec<u8>> {
+        trace!(target: "hm_driver_rs::files", remote, ?method, "捕获截图");
         let remote_guard = RemoteFileGuard::new(self.inner.hdc.clone(), remote.to_owned());
         let command = match method {
             ScreenshotMethod::SnapshotDisplay => format!("snapshot_display -f {remote}"),
