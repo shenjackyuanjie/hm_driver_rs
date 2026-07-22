@@ -3,7 +3,7 @@ use crate::{
     AbilityInfo, AgentProfile, AgentSource, AppIdentifier, CommandOutput, DeviceDescriptor,
     DeviceInfo, DeviceSelector, DisplayRotation, DisplaySize, DriverConfig, ForwardEntry, Gesture,
     HdcConfig, KeyCode, OpenUrlMode, Point, Position, Result, ScreenState, ScreenshotMethod,
-    Selector, SwipeArea, SwipeDirection, UiNode,
+    Selector, SwipeArea, SwipeDirection, UiNode, MatchPattern,
 };
 use serde_json::Value;
 use std::net::IpAddr;
@@ -593,6 +593,38 @@ impl HmDriver {
     /// 返回 `true` 表示应用已在超时时间内出现。
     pub fn wait_for_app(&self, bundle: &AppIdentifier, timeout: Duration) -> Result<bool> {
         block_on(self.inner.wait_for_app(bundle, timeout))?
+    }
+
+    /// 等待文本内容匹配的节点出现，超时返回 `Err(ElementNotFound)`。
+    pub fn wait_for_text(
+        &self,
+        text: &str,
+        pattern: MatchPattern,
+        timeout: Duration,
+    ) -> Result<UiNode> {
+        block_on(self.inner.wait_for_text(text, pattern, timeout))?
+    }
+
+    /// 在超时时间内轮询 UI 树，直到某个节点满足 `predicate`。
+    pub fn wait_for_ui(
+        &self,
+        timeout: Duration,
+        predicate: impl Fn(&UiNode) -> bool,
+    ) -> Result<UiNode> {
+        block_on(self.inner.wait_for_ui(timeout, predicate))?
+    }
+
+    /// 使用指定的轮询间隔等待 UI 节点出现。
+    pub fn wait_for_ui_with_interval(
+        &self,
+        timeout: Duration,
+        interval: Duration,
+        predicate: impl Fn(&UiNode) -> bool,
+    ) -> Result<UiNode> {
+        block_on(
+            self.inner
+                .wait_for_ui_with_interval(timeout, interval, predicate),
+        )?
     }
 
     /// 通过 XPath 表达式查找元素，找不到时返回 `Err`。
