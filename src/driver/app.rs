@@ -6,8 +6,8 @@ use crate::{DriverError, Result};
 use regex::Regex;
 use serde_json::Value;
 use std::path::Path;
-use url::Url;
 use tracing::{debug, info, trace};
+use url::Url;
 
 impl HmDriver {
     /// 安装应用（通过 HDC 发送 APK/HAP 到设备并安装）。
