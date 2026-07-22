@@ -43,6 +43,25 @@ impl UiNode {
     ///
     /// 供在不通过 [`crate::HmDriver::ui_tree`] 的情况下（例如自行用 `raw_shell`/
     /// `pull_file` 取回 dump 文件）复用同样的解析逻辑。
+    /// 在 UI 树中深度优先搜索第一个满足 `predicate` 的节点。
+    ///
+    /// 返回 `None` 表示未找到。
+    pub fn find(&self, predicate: impl Fn(&UiNode) -> bool) -> Option<&UiNode> {
+        if predicate(self) {
+            return Some(self);
+        }
+        for child in &self.children {
+            if let Some(found) = child.find(&predicate) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    /// 将 `uitest dumpLayout` 的原始 JSON（可能带有 `root` 包装层）解析为 [`UiNode`]。
+    ///
+    /// 供在不通过 [`crate::HmDriver::ui_tree`] 的情况下（例如自行用 `raw_shell`/
+    /// `pull_file` 取回 dump 文件）复用同样的解析逻辑。
     pub fn from_layout_json(value: Value) -> Result<UiNode> {
         let root = if let Some(root) = value.get("root") {
             root.clone()
