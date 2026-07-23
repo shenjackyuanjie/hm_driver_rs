@@ -4,6 +4,7 @@ use super::Selector;
 use crate::driver::HmDriver;
 use crate::{Bounds, DriverError, Result};
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::time::Duration;
 use tokio::time::{Instant, timeout_at};
@@ -131,8 +132,11 @@ impl Element {
     ///
     /// 支持的属性名包括 `id`、`key`、`type`、`text`、`description`、`hint`、
     /// `selected`、`checked`、`enabled`、`focused`、`checkable`、`clickable`、
-    /// `longClickable`、`scrollable`。
+    /// `longClickable`、`scrollable`、`originalText`。
     pub async fn attribute(&self, name: &str) -> Result<Value> {
+        if name == "originalText" {
+            return self.original_text().await.map(Value::String);
+        }
         let method = match name {
             "id" | "key" => "getId",
             "type" => "getType",
@@ -150,6 +154,55 @@ impl Element {
             other => return Err(DriverError::Unsupported(format!("未知控件属性：{other}"))),
         };
         self.operate(method, json!([])).await
+    }
+
+    /// 一次 RPC 读取控件公开的全部属性。
+    pub async fn all_properties(&self) -> Result<BTreeMap<String, Value>> {
+        if let Some(level) = self.driver.api_level().await?
+            && level < 12
+        {
+            return Err(DriverError::Unsupported(format!(
+                "Component.getAllProperties 需要 API Level 12，当前为 {level}"
+            )));
+        }
+        let value = self.operate("getAllProperties", json!([])).await?;
+        let object = value.as_object().ok_or_else(|| {
+            DriverError::Protocol("Component.getAllProperties 未返回 JSON object".into())
+        })?;
+        Ok(object
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect())
+    }
+
+    /// 读取控件未经展示层转换的原始文本。
+    pub async fn original_text(&self) -> Result<String> {
+        match self.driver.api_level().await? {
+            Some(20..) => value_string(
+                self.operate("getOriginalText", json!([])).await?,
+                "originalText",
+            ),
+            Some(12..=19) => original_text_from_properties(self.all_properties().await?),
+            Some(level) => Err(DriverError::Unsupported(format!(
+                "originalText 需要 API Level 12，当前为 {level}"
+            ))),
+            None => match self.operate("getOriginalText", json!([])).await {
+                Ok(value) => value_string(value, "originalText"),
+                Err(DriverError::Hypium(message)) if is_method_not_found(&message) => {
+                    match self.all_properties().await {
+                        Ok(properties) => original_text_from_properties(properties),
+                        Err(DriverError::Hypium(message)) if is_method_not_found(&message) => {
+                            Err(DriverError::Unsupported(
+                                "设备不支持 Component.getOriginalText 或 Component.getAllProperties"
+                                    .into(),
+                            ))
+                        }
+                        Err(error) => Err(error),
+                    }
+                }
+                Err(error) => Err(error),
+            },
+        }
     }
 
     /// 读取控件的资源 ID。
@@ -497,4 +550,184 @@ fn value_bool(value: Value, name: &str) -> Result<bool> {
     value
         .as_bool()
         .ok_or_else(|| DriverError::Protocol(format!("控件属性 {name} 不是布尔值")))
+}
+
+fn original_text_from_properties(properties: BTreeMap<String, Value>) -> Result<String> {
+    let Some(value) = properties.get("originalText") else {
+        return Err(DriverError::Unsupported(
+            "Component.getAllProperties 未提供 originalText".into(),
+        ));
+    };
+    value_string(value.clone(), "originalText")
+}
+
+fn is_method_not_found(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    message.contains("method") && (message.contains("not found") || message.contains("undefined"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rpc::{ApiDialect, RpcClient};
+    use std::sync::Arc;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::TcpListener;
+    use tokio::sync::Mutex as TokioMutex;
+
+    async fn scripted_element(
+        dialect: ApiDialect,
+        api_level: Option<u32>,
+        responses: Vec<(Value, Value)>,
+    ) -> (Element, Arc<TokioMutex<Vec<String>>>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let calls = Arc::new(TokioMutex::new(Vec::new()));
+        let server_calls = calls.clone();
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let (reader, mut writer) = stream.into_split();
+            let mut lines = BufReader::new(reader).lines();
+            for (result, exception) in responses {
+                let request: Value =
+                    serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+                server_calls
+                    .lock()
+                    .await
+                    .push(request["params"]["api"].as_str().unwrap().to_owned());
+                let response = json!({
+                    "request_id": request["request_id"],
+                    "result": result,
+                    "exception": exception
+                });
+                writer
+                    .write_all(serde_json::to_string(&response).unwrap().as_bytes())
+                    .await
+                    .unwrap();
+                writer.write_all(b"\n").await.unwrap();
+            }
+        });
+        let rpc = RpcClient::connect(
+            port,
+            Duration::from_secs(1),
+            Duration::from_secs(1),
+            1024 * 1024,
+        )
+        .await
+        .unwrap();
+        let driver = HmDriver::with_test_rpc_api_level(rpc, dialect, api_level);
+        let generation = driver.generation();
+        (
+            Element::new(
+                driver,
+                Selector::new(),
+                0,
+                format!("{}#1", dialect.component()),
+                generation,
+            ),
+            calls,
+        )
+    }
+
+    #[tokio::test]
+    async fn api_20_uses_get_original_text_and_attribute_reuses_it() {
+        let (element, calls) = scripted_element(
+            ApiDialect::Modern,
+            Some(20),
+            vec![(json!("0.25"), Value::Null), (json!("0.50"), Value::Null)],
+        )
+        .await;
+
+        assert_eq!(element.original_text().await.unwrap(), "0.25");
+        assert_eq!(
+            element.attribute("originalText").await.unwrap(),
+            json!("0.50")
+        );
+        assert_eq!(
+            *calls.lock().await,
+            vec!["Component.getOriginalText", "Component.getOriginalText"]
+        );
+    }
+
+    #[tokio::test]
+    async fn api_12_to_19_reads_original_text_from_all_properties() {
+        let (element, calls) = scripted_element(
+            ApiDialect::Legacy,
+            Some(15),
+            vec![(json!({"originalText": "0.75", "text": "75%"}), Value::Null)],
+        )
+        .await;
+
+        assert_eq!(element.original_text().await.unwrap(), "0.75");
+        assert_eq!(*calls.lock().await, vec!["UiComponent.getAllProperties"]);
+    }
+
+    #[tokio::test]
+    async fn unknown_api_falls_back_only_when_method_is_missing() {
+        let (element, calls) = scripted_element(
+            ApiDialect::Modern,
+            None,
+            vec![
+                (Value::Null, json!("method getOriginalText not found")),
+                (json!({"originalText": "0.9"}), Value::Null),
+            ],
+        )
+        .await;
+
+        assert_eq!(element.original_text().await.unwrap(), "0.9");
+        assert_eq!(
+            *calls.lock().await,
+            vec!["Component.getOriginalText", "Component.getAllProperties"]
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_api_normalizes_two_missing_methods_to_unsupported() {
+        let (element, _) = scripted_element(
+            ApiDialect::Modern,
+            None,
+            vec![
+                (Value::Null, json!("method getOriginalText is undefined")),
+                (Value::Null, json!("method getAllProperties not found")),
+            ],
+        )
+        .await;
+
+        assert!(matches!(
+            element.original_text().await,
+            Err(DriverError::Unsupported(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn all_properties_validates_object_and_original_text() {
+        let (element, _) =
+            scripted_element(ApiDialect::Modern, Some(15), vec![(json!([]), Value::Null)]).await;
+        assert!(matches!(
+            element.all_properties().await,
+            Err(DriverError::Protocol(_))
+        ));
+
+        let (element, _) = scripted_element(
+            ApiDialect::Modern,
+            Some(15),
+            vec![(json!({"text": "missing"}), Value::Null)],
+        )
+        .await;
+        assert!(matches!(
+            element.original_text().await,
+            Err(DriverError::Unsupported(_))
+        ));
+
+        let (element, _) = scripted_element(
+            ApiDialect::Modern,
+            Some(15),
+            vec![(json!({"originalText": 1}), Value::Null)],
+        )
+        .await;
+        assert!(matches!(
+            element.original_text().await,
+            Err(DriverError::Protocol(_))
+        ));
+    }
 }

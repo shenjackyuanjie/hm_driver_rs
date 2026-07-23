@@ -91,6 +91,11 @@ impl Selector {
         self.string("text", pattern.into())
     }
 
+    /// 按控件的原始文本内容匹配。
+    pub fn original_text(self, pattern: impl Into<MatchPattern>) -> Self {
+        self.string("originalText", pattern.into())
+    }
+
     /// 按控件的类型名称匹配。
     pub fn type_name(self, pattern: impl Into<MatchPattern>) -> Self {
         self.string("type", pattern.into())
@@ -282,7 +287,7 @@ mod tests {
             let (stream, _) = listener.accept().await.unwrap();
             let (reader, mut writer) = stream.into_split();
             let mut lines = BufReader::new(reader).lines();
-            for index in 1..=6 {
+            for index in 1..=7 {
                 let line = lines.next_line().await.unwrap().unwrap();
                 let request: Value = serde_json::from_str(&line).unwrap();
                 server_calls.lock().await.push((
@@ -313,20 +318,22 @@ mod tests {
         let selector = Selector::new()
             .id("title")
             .text("设置")
+            .original_text("原文")
             .enabled(true)
             .within(Selector::new().type_name("List"))
             .in_window(&crate::AppIdentifier::new("com.example.app").unwrap());
-        assert_eq!(selector.build_remote(&driver).await.unwrap(), "On#6");
-        assert_eq!(driver.queued_reference_count(), 5);
+        assert_eq!(selector.build_remote(&driver).await.unwrap(), "On#7");
+        assert_eq!(driver.queued_reference_count(), 6);
         assert_eq!(
             *calls.lock().await,
             vec![
                 ("On.id".into(), "On#seed".into()),
                 ("On.text".into(), "On#1".into()),
-                ("On.enabled".into(), "On#2".into()),
+                ("On.originalText".into(), "On#2".into()),
+                ("On.enabled".into(), "On#3".into()),
                 ("On.type".into(), "On#seed".into()),
-                ("On.within".into(), "On#3".into()),
-                ("On.inWindow".into(), "On#5".into()),
+                ("On.within".into(), "On#4".into()),
+                ("On.inWindow".into(), "On#6".into()),
             ]
         );
     }

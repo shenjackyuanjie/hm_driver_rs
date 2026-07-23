@@ -253,13 +253,17 @@ async fn gestures(driver: &hm_driver_rs::HmDriver) -> Result<()> {
 
 ### UI 树、Selector 和控件
 
-`ui_tree()` 通过 `uitest dumpLayout` 获取当前界面，解析为可遍历的 `UiNode`。节点
-支持属性读取、bounds 解析、深度优先 `find()` 和 `find_all()`；解析器同时接受直接根节点
-和带 `root` 包装层的 JSON。
+`ui_tree()` 通过 `uitest dumpLayout` 获取当前界面，适合分析整棵树、父子关系和保存失败
+现场。它会传输并解析完整布局，开销明显高于 RPC 元素查询。只需按属性定位或高频轮询
+控件时，应优先使用 `Selector` 配合 `find()`、`find_all()`、`exists()` 或 `wait_for()`；
+这些接口直接调用 Hypium RPC，不抓取完整 UI 树。
+
+UI 树节点支持属性读取、bounds 解析、深度优先 `find()` 和 `find_all()`；解析器同时接受
+直接根节点和带 `root` 包装层的 JSON。
 
 `Selector` 支持以下条件的链式组合：
 
-- `id()`、`key()`、`text()`、`type_name()`、`description()`、`hint()`；
+- `id()`、`key()`、`text()`、`original_text()`、`type_name()`、`description()`、`hint()`；
 - `selected()`、`checked()`、`enabled()`、`focused()`、`checkable()`、`clickable()`、
   `long_clickable()`、`scrollable()`；
 - `before()`、`after()`、`within()`、`in_window()` 和结果 `index()`；
@@ -269,12 +273,17 @@ async fn gestures(driver: &hm_driver_rs::HmDriver) -> Result<()> {
 
 - `find()`、`find_all()`、`exists()`、`count()`、`click_if_exists()`；
 - `wait_for()`、`wait_for_text()`、`wait_for_ui()`；
-- `Element` 的属性、布尔状态、bounds、`info()`；
+- `Element` 的属性、布尔状态、bounds、`all_properties()`、`original_text()`、`info()`；
 - 控件点击、双击、长按、输入/清除文本、滚动到顶部/底部、滚动搜索、拖到其他控件、
   捏合缩放以及等待控件消失或属性变化。
 
 Selector 链、未选中的控件引用和滚动搜索产生的临时引用会分批释放，避免长时间轮询
 耗尽 Agent 端对象。
+
+`all_properties()` 需要 API Level 12 及以上。`original_text()` 在 API Level 20 及以上
+调用 `Component.getOriginalText`，API Level 12 到 19 从 `Component.getAllProperties`
+读取；低于 12 返回 `DriverError::Unsupported`。API Level 未知时会按这个顺序做能力探测，
+且仅在方法不存在时回退，RPC、协议和设备通信错误仍原样返回。
 
 ### XPath
 

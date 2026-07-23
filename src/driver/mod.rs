@@ -333,6 +333,14 @@ impl HmDriver {
             .ok_or(DriverError::SessionInvalid)
     }
 
+    pub(crate) async fn api_level(&self) -> Result<Option<u32>> {
+        let state = self.inner.state.lock().await;
+        if state.closed {
+            return Err(DriverError::DriverClosed);
+        }
+        Ok(state.api_level)
+    }
+
     /// 直接调用任意 Hypium RPC API。
     ///
     /// `api` 为完整方法名（如 `"Driver.click"`），`this` 为可选的远端对象引用，
@@ -561,6 +569,15 @@ impl HmDriver {
 
     #[cfg(test)]
     pub(crate) fn with_test_rpc(rpc: RpcClient, dialect: ApiDialect) -> Self {
+        Self::with_test_rpc_api_level(rpc, dialect, Some(9))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_test_rpc_api_level(
+        rpc: RpcClient,
+        dialect: ApiDialect,
+        api_level: Option<u32>,
+    ) -> Self {
         let hdc = HdcRunner::new(
             HdcConfig::default()
                 .with_path(std::env::current_exe().expect("测试程序路径"))
@@ -593,7 +610,7 @@ impl HmDriver {
                     owned_forwards: Vec::new(),
                     generation: 1,
                     closed: false,
-                    api_level: Some(9),
+                    api_level,
                 }),
                 cleaner: StdMutex::new(Vec::new()),
                 generation: AtomicU64::new(1),

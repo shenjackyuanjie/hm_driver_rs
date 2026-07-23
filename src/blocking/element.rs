@@ -1,6 +1,7 @@
 use super::block_on;
 use crate::{Bounds, ElementInfo, Point, Result};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::time::Duration;
 use tracing::trace;
 
@@ -19,6 +20,16 @@ impl Element {
     /// * `name` - 属性名称（如 `"content-desc"`、`"text"` 等）
     pub fn attribute(&self, name: &str) -> Result<Value> {
         block_on(self.inner.attribute(name))?
+    }
+
+    /// 一次 RPC 读取控件公开的全部属性。
+    pub fn all_properties(&self) -> Result<BTreeMap<String, Value>> {
+        block_on(self.inner.all_properties())?
+    }
+
+    /// 获取控件未经展示层转换的原始文本。
+    pub fn original_text(&self) -> Result<String> {
+        block_on(self.inner.original_text())?
     }
 
     /// 获取控件的唯一标识 ID。
