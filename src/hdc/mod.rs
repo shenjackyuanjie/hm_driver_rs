@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::process::Command;
 use tokio::time::timeout;
-use tracing::{debug, trace, warn};
+use tracing::{debug, warn};
 
 /// HDC 进程配置。
 #[derive(Clone, Debug)]
@@ -136,7 +136,7 @@ impl HdcRunner {
             command.arg("-t").arg(serial.expose_secret());
         }
         command.args(arguments);
-        debug!(target: "hm_driver_rs::hdc", "执行 HDC 命令");
+        debug!(target: "hm_driver_rs::hdc", command = ?command, "执行 HDC 命令");
         let child = command.spawn().map_err(DriverError::HdcSpawn)?;
         let result = match timeout(duration, child.wait_with_output()).await {
             Ok(Ok(output)) => output,
@@ -148,7 +148,6 @@ impl HdcRunner {
         };
         let stdout = self.redact(String::from_utf8_lossy(&result.stdout).into_owned());
         let stderr = self.redact(String::from_utf8_lossy(&result.stderr).into_owned());
-        trace!(target: "hm_driver_rs::hdc", status = ?result.status.code(), "HDC 命令执行完毕");
         let failed_marker = contains_failure_marker(&stdout) || contains_failure_marker(&stderr);
         if !result.status.success() || failed_marker {
             return Err(DriverError::HdcCommand {

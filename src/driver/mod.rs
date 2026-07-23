@@ -370,7 +370,6 @@ impl HmDriver {
     }
 
     async fn call_direct(&self, api: &str, this: Option<&str>, args: Value) -> Result<Value> {
-        trace!(target: "hm_driver_rs::driver", api, ?this, "直接调用 API");
         let rpc = {
             let state = self.inner.state.lock().await;
             if state.closed {

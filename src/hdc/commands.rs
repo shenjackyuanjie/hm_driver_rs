@@ -6,7 +6,7 @@ use crate::{DriverError, Result};
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
 use std::time::Duration;
-use tracing::{debug, trace};
+use tracing::debug;
 
 impl HdcRunner {
     pub async fn discover(&self) -> Result<Vec<DeviceDescriptor>> {
@@ -38,7 +38,6 @@ impl HdcRunner {
     }
 
     pub async fn shell(&self, command: impl AsRef<OsStr>) -> Result<CommandOutput> {
-        trace!(target: "hm_driver_rs::hdc::commands", command = %command.as_ref().to_string_lossy(), "Shell 命令");
         self.run(
             [OsString::from("shell"), command.as_ref().to_owned()],
             self.inner.config.command_timeout,
@@ -105,7 +104,6 @@ impl HdcRunner {
     }
 
     pub async fn forward(&self, local_port: u16, remote: &str) -> Result<()> {
-        trace!(target: "hm_driver_rs::hdc::commands", local_port, remote, "端口转发");
         self.run(
             [
                 OsString::from("fport"),
@@ -120,7 +118,6 @@ impl HdcRunner {
     }
 
     pub async fn remove_forward(&self, local_port: u16, remote: &str) -> Result<()> {
-        trace!(target: "hm_driver_rs::hdc::commands", local_port, remote, "移除端口转发");
         let remote_endpoint = super::parse::parse_forward_endpoint(remote)?;
         if !self.forward_exists(local_port, &remote_endpoint).await? {
             return Ok(());
