@@ -1,6 +1,8 @@
 use crate::{DriverError, Result};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::net::IpAddr;
 
@@ -389,6 +391,160 @@ pub enum SwipeDirection {
     Left,
     /// 向右滑动。
     Right,
+}
+
+/// 鼠标按键。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum MouseButton {
+    /// 鼠标左键。
+    #[default]
+    Left = 0,
+    /// 鼠标右键。
+    Right = 1,
+    /// 鼠标中键。
+    Middle = 2,
+}
+
+impl MouseButton {
+    pub(crate) const fn value(self) -> u8 {
+        self as u8
+    }
+}
+
+/// UI 事件监听类型。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UiEventType {
+    /// Toast 出现。
+    ToastShow,
+    /// Dialog 出现。
+    DialogShow,
+}
+
+impl UiEventType {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::ToastShow => "toastShow",
+            Self::DialogShow => "dialogShow",
+        }
+    }
+}
+
+/// UITest Agent 返回的一次 UI 事件。
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct UiEvent {
+    /// 产生事件的应用包名。
+    #[serde(rename = "bundleName", default)]
+    pub bundle_name: Option<String>,
+    /// 事件关联文本。
+    #[serde(default)]
+    pub text: Option<String>,
+    /// 控件或事件类型，如 `Toast`、`AlertDialog`。
+    #[serde(rename = "type", default)]
+    pub event_type: Option<String>,
+    /// Agent 返回的其他字段。
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
+}
+
+/// 窗口显示模式。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum WindowMode {
+    /// 全屏窗口。
+    Fullscreen = 0,
+    /// 主分屏窗口。
+    Primary = 1,
+    /// 次分屏窗口。
+    Secondary = 2,
+    /// 悬浮窗口。
+    Floating = 3,
+}
+
+impl TryFrom<i64> for WindowMode {
+    type Error = DriverError;
+
+    fn try_from(value: i64) -> Result<Self> {
+        match value {
+            0 => Ok(Self::Fullscreen),
+            1 => Ok(Self::Primary),
+            2 => Ok(Self::Secondary),
+            3 => Ok(Self::Floating),
+            _ => Err(DriverError::Protocol(format!("未知窗口模式：{value}"))),
+        }
+    }
+}
+
+/// 调整窗口大小时使用的方向。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ResizeDirection {
+    Left = 0,
+    Right = 1,
+    Up = 2,
+    Down = 3,
+    LeftUp = 4,
+    LeftDown = 5,
+    RightUp = 6,
+    RightDown = 7,
+}
+
+impl ResizeDirection {
+    pub(crate) const fn value(self) -> u8 {
+        self as u8
+    }
+}
+
+/// 用于查找窗口的组合条件。
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowFilter {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bundle_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    focused: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    actived: Option<bool>,
+}
+
+impl WindowFilter {
+    /// 创建空窗口过滤器。
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 按窗口标题过滤。
+    pub fn title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    /// 按应用包名过滤。
+    pub fn bundle(mut self, bundle: &AppIdentifier) -> Self {
+        self.bundle_name = Some(bundle.as_str().to_owned());
+        self
+    }
+
+    /// 按焦点状态过滤。
+    pub fn focused(mut self, focused: bool) -> Self {
+        self.focused = Some(focused);
+        self
+    }
+
+    /// 按活动状态过滤。
+    pub fn active(mut self, active: bool) -> Self {
+        self.actived = Some(active);
+        self
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.title.is_none()
+            && self.bundle_name.is_none()
+            && self.focused.is_none()
+            && self.actived.is_none()
+    }
 }
 
 /// 方向滑动使用的屏幕区域。

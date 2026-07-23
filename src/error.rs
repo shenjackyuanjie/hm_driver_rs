@@ -142,6 +142,9 @@ pub enum DriverError {
     /// 未找到匹配的 UI 控件。
     #[error("未找到控件")]
     ElementNotFound,
+    /// 未找到匹配的窗口。
+    #[error("未找到窗口")]
+    WindowNotFound,
     /// XPath 表达式语法无效。
     #[error("XPath 表达式无效：{0}")]
     InvalidXPath(String),

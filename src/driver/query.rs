@@ -106,7 +106,7 @@ impl HmDriver {
         }
     }
 
-    /// 等待文本内容匹配的节点出现（等于、包含、前缀或后缀）。
+    /// 等待文本内容匹配的节点出现（支持精确、包含、前后缀和正则表达式）。
     ///
     /// 内部使用 [`wait_for_ui`] 轮询 UI 树，超时返回 `Err(ElementNotFound)`。
     pub async fn wait_for_text(
@@ -116,15 +116,16 @@ impl HmDriver {
         timeout: Duration,
     ) -> Result<UiNode> {
         debug!(target: "hm_driver_rs::query", text, ?pattern, ?timeout, "wait_for_text");
+        if matches!(
+            &pattern,
+            MatchPattern::Regex(_) | MatchPattern::RegexCaseInsensitive(_)
+        ) {
+            let _ = pattern.matches_with("", text)?;
+        }
         let owned = text.to_owned();
         self.wait_for_ui(timeout, move |node| {
-            let actual = node.attribute("text");
-            match &pattern {
-                MatchPattern::Equals(_) => actual.as_deref() == Some(&owned),
-                MatchPattern::Contains(_) => actual.is_some_and(|v| v.contains(&owned)),
-                MatchPattern::StartsWith(_) => actual.is_some_and(|v| v.starts_with(&owned)),
-                MatchPattern::EndsWith(_) => actual.is_some_and(|v| v.ends_with(&owned)),
-            }
+            node.attribute("text")
+                .is_some_and(|actual| pattern.matches_with(&actual, &owned).unwrap_or(false))
         })
         .await
     }

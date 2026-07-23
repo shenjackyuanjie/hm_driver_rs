@@ -114,6 +114,11 @@ impl Element {
         block_on(self.inner.bounds_center())?
     }
 
+    /// 按控件边界中的相对偏移计算坐标。
+    pub fn point_at(&self, offset_x: f64, offset_y: f64) -> Result<Point> {
+        block_on(self.inner.point_at(offset_x, offset_y))?
+    }
+
     /// 获取控件的完整信息集合（包含各种属性和状态）。
     pub fn info(&self) -> Result<ElementInfo> {
         block_on(self.inner.info())?
@@ -135,6 +140,21 @@ impl Element {
     pub fn long_click(&self) -> Result<()> {
         trace!(target: "hm_driver_rs::blocking", "阻塞 Element::long_click");
         block_on(self.inner.long_click())?
+    }
+
+    /// 点击控件中的相对偏移位置。
+    pub fn click_at(&self, offset_x: f64, offset_y: f64) -> Result<()> {
+        block_on(self.inner.click_at(offset_x, offset_y))?
+    }
+
+    /// 双击控件中的相对偏移位置。
+    pub fn double_click_at(&self, offset_x: f64, offset_y: f64) -> Result<()> {
+        block_on(self.inner.double_click_at(offset_x, offset_y))?
+    }
+
+    /// 长按控件中的相对偏移位置。
+    pub fn long_click_at(&self, offset_x: f64, offset_y: f64) -> Result<()> {
+        block_on(self.inner.long_click_at(offset_x, offset_y))?
     }
 
     /// 在控件中输入文本。

@@ -10,10 +10,12 @@
 
 mod app;
 mod device;
+mod events;
 mod files;
 mod input;
 mod query;
 mod session;
+mod window;
 
 #[cfg(test)]
 mod tests;
@@ -26,7 +28,7 @@ use crate::{DriverError, Result};
 use serde_json::{Value, json};
 use std::future::Future;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
@@ -158,6 +160,7 @@ impl HmDriverBuilder {
                 }),
                 cleaner: StdMutex::new(Vec::new()),
                 generation: AtomicU64::new(1),
+                ui_event_listening: AtomicBool::new(false),
             }),
         })
     }
@@ -186,6 +189,7 @@ pub(crate) struct HmDriverInner {
     state: Mutex<SessionState>,
     cleaner: StdMutex<Vec<QueuedReference>>,
     generation: AtomicU64,
+    ui_event_listening: AtomicBool,
 }
 
 struct SessionState {
@@ -414,6 +418,9 @@ impl HmDriver {
         self.inner
             .generation
             .store(state.generation, Ordering::Release);
+        self.inner
+            .ui_event_listening
+            .store(false, Ordering::Release);
         info!(target: "hm_driver_rs::driver", "会话恢复成功");
         Ok(())
     }
@@ -614,6 +621,7 @@ impl HmDriver {
                 }),
                 cleaner: StdMutex::new(Vec::new()),
                 generation: AtomicU64::new(1),
+                ui_event_listening: AtomicBool::new(false),
             }),
         }
     }

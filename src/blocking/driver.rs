@@ -1,9 +1,10 @@
-use super::{Element, XPathElement, block_on};
+use super::{Element, UiWindow, XPathElement, block_on};
 use crate::{
     AbilityInfo, AgentProfile, AgentSource, AppIdentifier, CommandOutput, DeviceDescriptor,
     DeviceInfo, DeviceSelector, DisplayRotation, DisplaySize, DriverConfig, ForwardEntry, Gesture,
-    HdcConfig, KeyCode, MatchPattern, OpenUrlMode, Point, Position, Result, ScreenState,
-    ScreenshotMethod, Selector, SwipeArea, SwipeDirection, UiNode,
+    HdcConfig, KeyCode, MatchPattern, MouseButton, OpenUrlMode, Point, Position, Result,
+    ScreenState, ScreenshotMethod, Selector, SwipeArea, SwipeDirection, UiEvent, UiEventType,
+    UiNode, WindowFilter,
 };
 use serde_json::Value;
 use std::net::IpAddr;
@@ -331,6 +332,121 @@ impl HmDriver {
         block_on(self.inner.perform_gesture(gesture))?
     }
 
+    /// 鼠标单击，支持最多两个组合键。
+    pub fn mouse_click(&self, point: Point, button: MouseButton, keys: &[KeyCode]) -> Result<()> {
+        block_on(self.inner.mouse_click(point, button, keys))?
+    }
+
+    /// 在绝对或归一化位置执行鼠标单击。
+    pub fn mouse_click_position(
+        &self,
+        position: Position,
+        button: MouseButton,
+        keys: &[KeyCode],
+    ) -> Result<()> {
+        block_on(self.inner.mouse_click_position(position, button, keys))?
+    }
+
+    /// 鼠标双击。
+    pub fn mouse_double_click(
+        &self,
+        point: Point,
+        button: MouseButton,
+        keys: &[KeyCode],
+    ) -> Result<()> {
+        block_on(self.inner.mouse_double_click(point, button, keys))?
+    }
+
+    /// 鼠标长按。
+    pub fn mouse_long_click(
+        &self,
+        point: Point,
+        button: MouseButton,
+        keys: &[KeyCode],
+    ) -> Result<()> {
+        block_on(self.inner.mouse_long_click(point, button, keys))?
+    }
+
+    /// 执行指定时长的鼠标长按。
+    pub fn mouse_long_click_for(
+        &self,
+        point: Point,
+        button: MouseButton,
+        duration: Duration,
+    ) -> Result<()> {
+        block_on(self.inner.mouse_long_click_for(point, button, duration))?
+    }
+
+    /// 滚动鼠标滚轮。正数向前/向上，负数向后/向下。
+    pub fn mouse_scroll(&self, point: Point, distance: i32, keys: &[KeyCode]) -> Result<()> {
+        block_on(self.inner.mouse_scroll(point, distance, keys))?
+    }
+
+    /// 将鼠标指针直接移动到指定坐标。
+    pub fn mouse_move_to(&self, point: Point) -> Result<()> {
+        block_on(self.inner.mouse_move_to(point))?
+    }
+
+    /// 沿轨迹移动鼠标。
+    pub fn mouse_move(&self, from: Point, to: Point, speed: u32) -> Result<()> {
+        block_on(self.inner.mouse_move(from, to, speed))?
+    }
+
+    /// 按住鼠标左键拖拽。
+    pub fn mouse_drag(&self, from: Point, to: Point, speed: u32) -> Result<()> {
+        block_on(self.inner.mouse_drag(from, to, speed))?
+    }
+
+    /// 触控笔点击。
+    pub fn pen_click(&self, point: Point) -> Result<()> {
+        block_on(self.inner.pen_click(point))?
+    }
+
+    /// 触控笔双击。
+    pub fn pen_double_click(&self, point: Point) -> Result<()> {
+        block_on(self.inner.pen_double_click(point))?
+    }
+
+    /// 触控笔长按。
+    pub fn pen_long_click(&self, point: Point, pressure: Option<f64>) -> Result<()> {
+        block_on(self.inner.pen_long_click(point, pressure))?
+    }
+
+    /// 触控笔滑动。
+    pub fn pen_swipe(
+        &self,
+        from: Point,
+        to: Point,
+        speed: u32,
+        pressure: Option<f64>,
+    ) -> Result<()> {
+        block_on(self.inner.pen_swipe(from, to, speed, pressure))?
+    }
+
+    /// 使用触控笔注入自定义轨迹。
+    pub fn perform_pen_gesture(&self, gesture: &Gesture, pressure: Option<f64>) -> Result<()> {
+        block_on(self.inner.perform_pen_gesture(gesture, pressure))?
+    }
+
+    /// 模拟触控板多指滑动。
+    pub fn touchpad_swipe(
+        &self,
+        direction: SwipeDirection,
+        fingers: u8,
+        hold_at_end: bool,
+        speed: Option<u32>,
+    ) -> Result<()> {
+        block_on(
+            self.inner
+                .touchpad_swipe(direction, fingers, hold_at_end, speed),
+        )?
+    }
+
+    /// 旋转手表表冠。
+    pub fn rotate_crown(&self, steps: i32, speed: Option<u16>) -> Result<()> {
+        block_on(self.inner.rotate_crown(steps, speed))?
+    }
+
     /// 在当前焦点处输入文本。
     ///
     /// 文本会直接输入到当前获得焦点的输入控件中。
@@ -346,6 +462,36 @@ impl HmDriver {
     /// * `timeout` - 等待的总超时时间
     pub fn wait_for_idle(&self, idle_time: Duration, timeout: Duration) -> Result<()> {
         block_on(self.inner.wait_for_idle(idle_time, timeout))?
+    }
+
+    /// 开始一次 UI 事件监听。
+    pub fn start_listen_ui_event(&self, event_type: UiEventType) -> Result<()> {
+        block_on(self.inner.start_listen_ui_event(event_type))?
+    }
+
+    /// 开始一次 Toast 监听。
+    pub fn start_listen_toast(&self) -> Result<()> {
+        block_on(self.inner.start_listen_toast())?
+    }
+
+    /// 等待并读取 UI 事件。
+    pub fn get_latest_ui_event(&self, timeout: Duration) -> Result<Option<UiEvent>> {
+        block_on(self.inner.get_latest_ui_event(timeout))?
+    }
+
+    /// 等待并读取 Toast 文本。
+    pub fn get_latest_toast(&self, timeout: Duration) -> Result<Option<String>> {
+        block_on(self.inner.get_latest_toast(timeout))?
+    }
+
+    /// 等待并检查 Toast 文本。
+    pub fn check_toast(
+        &self,
+        expected: &str,
+        pattern: MatchPattern,
+        timeout: Duration,
+    ) -> Result<bool> {
+        block_on(self.inner.check_toast(expected, pattern, timeout))?
     }
 
     /// 安装应用包（APK/Hap）。
@@ -500,6 +646,21 @@ impl HmDriver {
     /// 返回根节点，可通过递归遍历获取完整的界面元素层级。
     pub fn ui_tree(&self) -> Result<UiNode> {
         block_on(self.inner.ui_tree())?
+    }
+
+    /// 按组合条件查找窗口。
+    pub fn find_window(&self, filter: &WindowFilter) -> Result<Option<UiWindow>> {
+        Ok(block_on(self.inner.find_window(filter))??.map(|inner| UiWindow { inner }))
+    }
+
+    /// 获取当前活动窗口，找不到时回退到聚焦窗口。
+    pub fn current_window(&self) -> Result<Option<UiWindow>> {
+        Ok(block_on(self.inner.current_window())??.map(|inner| UiWindow { inner }))
+    }
+
+    /// 获取当前窗口大小。
+    pub fn window_size(&self) -> Result<Option<(u32, u32)>> {
+        block_on(self.inner.window_size())?
     }
 
     /// 查找与选择器匹配的第一个控件元素。

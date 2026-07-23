@@ -25,6 +25,7 @@
 mod driver;
 /// 元素（`Element`）的同步操作封装。
 mod element;
+mod window;
 /// XPath 相关扩展与元素查找的同步封装。
 mod xpath;
 
@@ -36,6 +37,8 @@ mod xpath;
 pub use driver::{HmDriver, HmDriverBuilder};
 /// 页面元素，提供同步的元素交互方法（点击、输入、属性获取等）。
 pub use element::Element;
+/// 窗口对象的同步操作封装。
+pub use window::UiWindow;
 /// 通过 XPath 定位到的元素集合，提供批量操作方法。
 pub use xpath::XPathElement;
 

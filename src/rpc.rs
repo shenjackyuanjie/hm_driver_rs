@@ -47,6 +47,11 @@ impl ApiDialect {
             Self::Legacy => "UiComponent",
         }
     }
+
+    /// 返回窗口对象类名。官方新旧方言都使用 `UiWindow`。
+    pub const fn window(self) -> &'static str {
+        "UiWindow"
+    }
 }
 
 #[derive(Clone)]

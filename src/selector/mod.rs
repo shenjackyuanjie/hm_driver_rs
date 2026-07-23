@@ -7,6 +7,7 @@ pub use element::{Element, ElementInfo};
 use crate::driver::HmDriver;
 use crate::rpc::ApiDialect;
 use crate::{DriverError, Result};
+use regex::RegexBuilder;
 use serde_json::{Value, json};
 use tracing::trace;
 
@@ -21,6 +22,10 @@ pub enum MatchPattern {
     StartsWith(String),
     /// 后缀匹配。
     EndsWith(String),
+    /// 正则表达式匹配。
+    Regex(String),
+    /// 忽略 ASCII/Unicode 大小写的正则表达式匹配。
+    RegexCaseInsensitive(String),
 }
 
 impl MatchPattern {
@@ -30,8 +35,41 @@ impl MatchPattern {
             Self::Contains(value) => (value, 1),
             Self::StartsWith(value) => (value, 2),
             Self::EndsWith(value) => (value, 3),
+            Self::Regex(value) => (value, 4),
+            Self::RegexCaseInsensitive(value) => (value, 5),
         };
         json!([value, mode])
+    }
+
+    /// 在主机端按当前匹配模式检查文本。
+    pub fn matches(&self, actual: &str) -> Result<bool> {
+        let expected = match self {
+            Self::Equals(value)
+            | Self::Contains(value)
+            | Self::StartsWith(value)
+            | Self::EndsWith(value)
+            | Self::Regex(value)
+            | Self::RegexCaseInsensitive(value) => value,
+        };
+        self.matches_with(actual, expected)
+    }
+
+    pub(crate) fn matches_with(&self, actual: &str, expected: &str) -> Result<bool> {
+        match self {
+            Self::Equals(_) => Ok(actual == expected),
+            Self::Contains(_) => Ok(actual.contains(expected)),
+            Self::StartsWith(_) => Ok(actual.starts_with(expected)),
+            Self::EndsWith(_) => Ok(actual.ends_with(expected)),
+            Self::Regex(_) => RegexBuilder::new(expected)
+                .build()
+                .map(|regex| regex.is_match(actual))
+                .map_err(|error| DriverError::InvalidArgument(format!("正则表达式无效：{error}"))),
+            Self::RegexCaseInsensitive(_) => RegexBuilder::new(expected)
+                .case_insensitive(true)
+                .build()
+                .map(|regex| regex.is_match(actual))
+                .map_err(|error| DriverError::InvalidArgument(format!("正则表达式无效：{error}"))),
+        }
     }
 }
 
@@ -241,6 +279,38 @@ impl Selector {
     pub(crate) fn selected_index(&self) -> usize {
         self.index
     }
+
+    pub(crate) fn matches_node(&self, node: &crate::UiNode) -> Result<bool> {
+        for condition in &self.conditions {
+            let matched = match condition {
+                SelectorCondition::String { name, pattern } => match node.attribute(name) {
+                    Some(value) => pattern.matches(&value)?,
+                    None => false,
+                },
+                SelectorCondition::Boolean { name, value } => {
+                    node.attribute(name)
+                        .and_then(|actual| actual.parse::<bool>().ok())
+                        == Some(*value)
+                }
+                SelectorCondition::InWindow(bundle) => node
+                    .attribute("bundleName")
+                    .or_else(|| node.attribute("bundle"))
+                    .is_some_and(|actual| actual == *bundle),
+                SelectorCondition::Before(_)
+                | SelectorCondition::After(_)
+                | SelectorCondition::Within(_) => {
+                    return Err(DriverError::Unsupported(
+                        "UI 树本地 Selector 查询暂不支持 before/after/within；请使用远端 find"
+                            .into(),
+                    ));
+                }
+            };
+            if !matched {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
 }
 
 fn mapped_attribute(dialect: ApiDialect, name: &'static str) -> &'static str {
@@ -275,6 +345,28 @@ mod tests {
             .index(2);
         assert_eq!(selector.conditions.len(), 3);
         assert_eq!(selector.selected_index(), 2);
+    }
+
+    #[test]
+    fn regular_expression_patterns_match_locally() {
+        assert!(
+            MatchPattern::Regex(r"设置\d+".into())
+                .matches("设置123")
+                .unwrap()
+        );
+        assert!(
+            MatchPattern::RegexCaseInsensitive("^hello$".into())
+                .matches("HeLLo")
+                .unwrap()
+        );
+        assert_eq!(
+            MatchPattern::Regex("设置.*".into()).argument(),
+            json!(["设置.*", 4])
+        );
+        assert_eq!(
+            MatchPattern::RegexCaseInsensitive("hello".into()).argument(),
+            json!(["hello", 5])
+        );
     }
 
     #[tokio::test]

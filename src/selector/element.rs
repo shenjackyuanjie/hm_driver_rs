@@ -287,6 +287,55 @@ impl Element {
         Ok(self.bounds().await?.center())
     }
 
+    /// 按控件边界中的相对偏移计算坐标。
+    ///
+    /// `(0, 0)` 为左上角，`(0.5, 0.5)` 为中心，`(1, 1)` 为右下角。
+    /// 与官方 Hypium 一致，大于 `1` 的值按像素偏移计算，负数按控件尺寸比例计算，
+    /// 因而也可指定控件外的位置。
+    pub async fn point_at(&self, offset_x: f64, offset_y: f64) -> Result<crate::Point> {
+        if !offset_x.is_finite() || !offset_y.is_finite() {
+            return Err(DriverError::InvalidCoordinate(
+                "控件相对偏移必须是有限数值".into(),
+            ));
+        }
+        let bounds = self.bounds().await?;
+        let x_offset = if offset_x > 1.0 {
+            offset_x
+        } else {
+            f64::from(bounds.width()) * offset_x
+        };
+        let y_offset = if offset_y > 1.0 {
+            offset_y
+        } else {
+            f64::from(bounds.height()) * offset_y
+        };
+        Ok(crate::Point::new(
+            (f64::from(bounds.left) + x_offset).round() as i32,
+            (f64::from(bounds.top) + y_offset).round() as i32,
+        ))
+    }
+
+    /// 点击控件内（或控件外）的相对偏移位置。
+    pub async fn click_at(&self, offset_x: f64, offset_y: f64) -> Result<()> {
+        self.driver
+            .click(self.point_at(offset_x, offset_y).await?)
+            .await
+    }
+
+    /// 双击控件内（或控件外）的相对偏移位置。
+    pub async fn double_click_at(&self, offset_x: f64, offset_y: f64) -> Result<()> {
+        self.driver
+            .double_click(self.point_at(offset_x, offset_y).await?)
+            .await
+    }
+
+    /// 长按控件内（或控件外）的相对偏移位置。
+    pub async fn long_click_at(&self, offset_x: f64, offset_y: f64) -> Result<()> {
+        self.driver
+            .long_click(self.point_at(offset_x, offset_y).await?)
+            .await
+    }
+
     /// 一次性读取控件的全部属性。
     ///
     /// 与逐个调用属性方法相比，此方法在一次往返中获取所有信息，
