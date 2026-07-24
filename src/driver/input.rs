@@ -116,6 +116,27 @@ impl HmDriver {
             .await
     }
 
+    /// 从起点滑动到终点，`duration_ms` 为滑动持续时间（毫秒）。
+    /// 内部根据距离与持续时间自动计算所需速度，再调用底层 `swipe` API。
+    pub async fn swipe_with_duration_ms(&self, from: Point, to: Point, duration_ms: u32) -> Result<()> {
+        trace!(target: "hm_driver_rs::input", from = %format!("({},{})", from.x, from.y), to = %format!("({},{})", to.x, to.y), duration_ms, "滑动(持续毫秒)");
+        if duration_ms == 0 {
+            return Err(DriverError::InvalidCoordinate("滑动持续时间必须大于 0".into()));
+        }
+        let dx = (to.x - from.x) as f64;
+        let dy = (to.y - from.y) as f64;
+        let distance = (dx * dx + dy * dy).sqrt();
+        let speed = (distance / (duration_ms as f64 / 1000.0)).round() as u32;
+        if !(200..=40_000).contains(&speed) {
+            return Err(DriverError::InvalidCoordinate(
+                format!("根据距离({distance:.0}px)与持续时间({duration_ms}ms)计算出的滑动速度({speed})不在 200–40000 范围内"),
+            ));
+        }
+        self.coordinate_call("swipe", json!([from.x, from.y, to.x, to.y, speed]))
+            .await
+    }
+
+
     /// 从归一化或绝对坐标位置滑动到目标位置。
     pub async fn swipe_positions(&self, from: Position, to: Position, speed: u32) -> Result<()> {
         let size = self.display_size().await?;
