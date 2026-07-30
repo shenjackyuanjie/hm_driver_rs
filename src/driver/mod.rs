@@ -430,7 +430,7 @@ impl HmDriver {
     /// 还将在设备端停止 singleness daemon。
     pub async fn close(&self) -> Result<()> {
         debug!(target: "hm_driver_rs::driver", "关闭会话");
-        self.flush_cleaner(true).await?;
+        let cleaner_error = self.flush_cleaner(true).await.err();
         let mut state = self.inner.state.lock().await;
         if state.closed {
             return Ok(());
@@ -442,14 +442,18 @@ impl HmDriver {
         state.driver_reference = None;
         let cleanup_issues =
             session::cleanup_owned_forwards(&self.inner.hdc, &mut state.owned_forwards).await;
-        if !cleanup_issues.is_empty() {
-            return Err(session::forward_cleanup_error(cleanup_issues));
-        }
-        if self.inner.config.kill_daemon_on_close {
-            session::stop_singleness_daemon(&self.inner.hdc).await?;
-        }
+        let forward_error =
+            (!cleanup_issues.is_empty()).then(|| session::forward_cleanup_error(cleanup_issues));
+        let daemon_error = if self.inner.config.kill_daemon_on_close {
+            session::stop_singleness_daemon(&self.inner.hdc).await.err()
+        } else {
+            None
+        };
         state.closed = true;
-        Ok(())
+        match cleaner_error.or(forward_error).or(daemon_error) {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 
     pub(crate) fn queue_remote_reference(&self, value: String, generation: u64) {

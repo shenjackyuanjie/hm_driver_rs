@@ -15,6 +15,8 @@ use tempfile::tempdir;
 use tokio::net::TcpListener;
 use tracing::{debug, info, trace, warn};
 
+const FORWARD_CLEANUP_ATTEMPTS: usize = 3;
+
 /// 成功建立 RPC 会话后的全部上下文。
 pub(super) struct EstablishedSession {
     /// 已连接的 RPC 客户端。
@@ -243,8 +245,9 @@ pub(super) async fn establish_session(
             remote: remote.clone(),
         });
         if let Err(error) = hdc.forward(port, &remote).await {
-            let cleanup_issues = cleanup_guard_forwards(&mut owned_forwards).await;
+            let cleanup_issues = cleanup_guard_forwards_with_retries(&mut owned_forwards).await;
             if !cleanup_issues.is_empty() {
+                owned_forwards.take();
                 return Err(forward_cleanup_after_operation(error, cleanup_issues));
             }
             last_error = Some(error);
@@ -262,8 +265,9 @@ pub(super) async fn establish_session(
             }
             Err(error) => {
                 warn!(target: "hm_driver_rs::session", error = %error, "RPC 会话建立重试");
-                let cleanup_issues = cleanup_guard_forwards(&mut owned_forwards).await;
+                let cleanup_issues = cleanup_guard_forwards_with_retries(&mut owned_forwards).await;
                 if !cleanup_issues.is_empty() {
+                    owned_forwards.take();
                     return Err(forward_cleanup_after_operation(error, cleanup_issues));
                 }
                 last_error = Some(error);
@@ -280,8 +284,28 @@ pub(super) async fn cleanup_owned_forwards(
 ) -> Vec<ForwardCleanupIssue> {
     debug!(target: "hm_driver_rs::session", "清理端口转发");
     let mut guard = ForwardCleanupGuard::new(hdc.clone(), std::mem::take(owned_forwards));
-    let issues = cleanup_guard_forwards(&mut guard).await;
+    let issues = cleanup_guard_forwards_with_retries(&mut guard).await;
     *owned_forwards = guard.take();
+    issues
+}
+
+async fn cleanup_guard_forwards_with_retries(
+    guard: &mut ForwardCleanupGuard,
+) -> Vec<ForwardCleanupIssue> {
+    let mut issues = Vec::new();
+    for attempt in 1..=FORWARD_CLEANUP_ATTEMPTS {
+        issues = cleanup_guard_forwards(guard).await;
+        if issues.is_empty() {
+            return issues;
+        }
+        warn!(
+            target: "hm_driver_rs::session",
+            attempt,
+            max_attempts = FORWARD_CLEANUP_ATTEMPTS,
+            failures = issues.len(),
+            "移除 HDC forward 失败"
+        );
+    }
     issues
 }
 
@@ -330,11 +354,9 @@ impl Drop for ForwardCleanupGuard {
         }
         let hdc = self.hdc.clone();
         spawn_cleanup(async move {
-            for forward in forwards {
-                let _ = hdc
-                    .remove_forward(forward.local_port, &forward.remote)
-                    .await;
-            }
+            let mut guard = ForwardCleanupGuard::new(hdc, forwards);
+            let _ = cleanup_guard_forwards_with_retries(&mut guard).await;
+            guard.take();
         });
     }
 }
