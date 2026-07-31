@@ -19,8 +19,8 @@ impl AgentCatalog {
     /// 同时验证 source_package、source_wheel 以及 Agent 数量是否与预期一致。
     pub fn load() -> Result<Self> {
         let catalog: Self = serde_json::from_str(include_str!("../assets/agents.json"))?;
-        if catalog.source_package != "devecotesting-hypium-6.1.0.210.zip"
-            || catalog.source_wheel != "xdevice_devicetest-6.1.0.210-py3-none-any.whl"
+        if catalog.source_package != "devecotesting-hypium-26.0.0.400.zip"
+            || catalog.source_wheel != "xdevice_devicetest-26.0.0.400-py3-none-any.whl"
         {
             return Err(DriverError::InvalidAgentCatalog(
                 "官方包或 wheel 来源字段不匹配".into(),
@@ -57,10 +57,13 @@ mod tests {
     #[test]
     fn catalog_pins_official_files() {
         let catalog = AgentCatalog::load().unwrap();
-        assert_eq!(catalog.source_package, "devecotesting-hypium-6.1.0.210.zip");
+        assert_eq!(
+            catalog.source_package,
+            "devecotesting-hypium-26.0.0.400.zip"
+        );
         assert_eq!(
             catalog.source_wheel,
-            "xdevice_devicetest-6.1.0.210-py3-none-any.whl"
+            "xdevice_devicetest-26.0.0.400-py3-none-any.whl"
         );
         let pinned = [
             (
@@ -74,19 +77,19 @@ mod tests {
                 "fc2322feb8145ddda244f2b97046f448d040d886e6f81e546842ee45fa028781",
             ),
             (
-                "uitest_agent_v1.1.10.so",
+                "uitest_agent_v1.1.12.so",
+                600_247,
+                "ae00607958c2e73624319b3066dc427111b2b8224fb292909c8563f686a6ab2c",
+            ),
+            (
+                "uitest_agent_v1.1.12.x86_64_so",
+                1_465_286,
+                "b7aee90fa38ea2ee79b2b91a2add750e27a3e0bb7c3e0dcea0e837a99c9d7563",
+            ),
+            (
+                "uitest_agent_v1.2.3.so",
                 600_246,
-                "1c9286456fb003ee15d86fef04e8c93f004027349e6dd2ef972c792e0a6d4bf8",
-            ),
-            (
-                "uitest_agent_v1.1.9.x86_64_so",
-                1_460_181,
-                "24a14a7841ec376dad4e1fa741de8f9f218c652a7e6d0100077798006367b274",
-            ),
-            (
-                "uitest_agent_v1.2.2.so",
-                600_245,
-                "e1b8e75fad983aa29640784ee4b457fe7ac1c916a15f72c8b899d5a7716da651",
+                "5dfbaca7e274a85bece8f225148ceb759b94d7319b956b9a7ea40d37944e4a9b",
             ),
         ];
         for (name, size, sha256) in pinned {

@@ -1,6 +1,6 @@
 {
-  "source_package": "devecotesting-hypium-6.1.0.210.zip",
-  "source_wheel": "xdevice_devicetest-6.1.0.210-py3-none-any.whl",
+  "source_package": "devecotesting-hypium-26.0.0.400.zip",
+  "source_wheel": "xdevice_devicetest-26.0.0.400-py3-none-any.whl",
   "agents": [
     {
       "path": "devicetest/res/prototype/native/uitest_agent_v1.1.3.so",
@@ -25,34 +25,34 @@
       "compatibility": "official_reference_only"
     },
     {
-      "path": "devicetest/res/prototype/native/uitest_agent_v1.1.10.so",
-      "file_name": "uitest_agent_v1.1.10.so",
-      "size": 600246,
-      "sha256": "1c9286456fb003ee15d86fef04e8c93f004027349e6dd2ef972c792e0a6d4bf8",
+      "path": "devicetest/res/prototype/native/uitest_agent_v1.1.12.so",
+      "file_name": "uitest_agent_v1.1.12.so",
+      "size": 600247,
+      "sha256": "ae00607958c2e73624319b3066dc427111b2b8224fb292909c8563f686a6ab2c",
       "architecture": "arm64",
-      "version": "1.1.10",
+      "version": "1.1.12",
       "transport": { "kind": "tcp", "remote_port": 8012 },
       "condition": "已识别的非 x86_64 架构，且 UITest > 5.1.1.3 并且 <= 6.0.2.1",
       "compatibility": "official_reference_only"
     },
     {
-      "path": "devicetest/res/prototype/native/uitest_agent_v1.1.9.x86_64_so",
-      "file_name": "uitest_agent_v1.1.9.x86_64_so",
-      "size": 1460181,
-      "sha256": "24a14a7841ec376dad4e1fa741de8f9f218c652a7e6d0100077798006367b274",
+      "path": "devicetest/res/prototype/native/uitest_agent_v1.1.12.x86_64_so",
+      "file_name": "uitest_agent_v1.1.12.x86_64_so",
+      "size": 1465286,
+      "sha256": "b7aee90fa38ea2ee79b2b91a2add750e27a3e0bb7c3e0dcea0e837a99c9d7563",
       "architecture": "x86_64",
-      "version": "1.1.9",
+      "version": "1.1.12",
       "transport": { "kind": "tcp", "remote_port": 8012 },
       "condition": "x86_64 架构，优先级高于 UITest 版本",
       "compatibility": "official_reference_only"
     },
     {
-      "path": "devicetest/res/prototype/native/uitest_agent_v1.2.2.so",
-      "file_name": "uitest_agent_v1.2.2.so",
-      "size": 600245,
-      "sha256": "e1b8e75fad983aa29640784ee4b457fe7ac1c916a15f72c8b899d5a7716da651",
+      "path": "devicetest/res/prototype/native/uitest_agent_v1.2.3.so",
+      "file_name": "uitest_agent_v1.2.3.so",
+      "size": 600246,
+      "sha256": "5dfbaca7e274a85bece8f225148ceb759b94d7319b956b9a7ea40d37944e4a9b",
       "architecture": "arm64",
-      "version": "1.2.2",
+      "version": "1.2.3",
       "transport": { "kind": "local_abstract", "socket_name": "uitest_socket" },
       "condition": "已识别的非 x86_64 架构，且 UITest > 6.0.2.1",
       "compatibility": "locally_verified"

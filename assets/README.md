@@ -1,8 +1,8 @@
 # UITest Agent 资源
 
 本目录中的五个动态库逐字节提取自官方
-`devecotesting-hypium-6.1.0.210.zip` 软件包内的
-`xdevice_devicetest-6.1.0.210-py3-none-any.whl`，其 wheel 内原始目录为
+`devecotesting-hypium-26.0.0.400.zip` 软件包内的
+`xdevice_devicetest-26.0.0.400-py3-none-any.whl`，其 wheel 内原始目录为
 `devicetest/res/prototype/native/`。
 
 文件大小和 SHA-256 摘要固定记录在 `../agents.json`。目前尚未确认这些二进制文件的

@@ -199,7 +199,7 @@ impl RpcClient {
             for _ in 0..32 {
                 let frame = read_frame(&mut connection, self.inner.max_frame_size).await?;
                 let response: RpcResponse = serde_json::from_slice(&frame)?;
-                // v1.2.2 的 bin Agent 响应不带 request_id。单连接只允许一个在途请求，
+                // v1.2.x 的 bin Agent 响应不带 request_id。单连接只允许一个在途请求，
                 // 因此缺失 ID 时可安全归属于当前请求；存在 ID 时仍严格匹配。
                 if !response.request_id.is_empty() && response.request_id != request_id {
                     continue;

@@ -10,7 +10,7 @@ use std::time::Duration;
 
 #[tokio::test]
 #[ignore = "需要显式连接 HarmonyOS 真机"]
-async fn arm64_v122_smoke() -> hm_driver_rs::Result<()> {
+async fn arm64_v123_smoke() -> hm_driver_rs::Result<()> {
     if std::env::var("HM_DRIVER_SMOKE").as_deref() != Ok("1") {
         return Ok(());
     }
@@ -22,7 +22,7 @@ async fn arm64_v122_smoke() -> hm_driver_rs::Result<()> {
         .connect()
         .await?;
     eprintln!("阶段：读取设备状态");
-    assert_eq!(driver.agent_profile().version, "1.2.2");
+    assert_eq!(driver.agent_profile().version, "1.2.3");
     driver.screen_on().await?;
     let _ = driver.screen_state().await?;
     let _ = driver.wlan_ip().await?;

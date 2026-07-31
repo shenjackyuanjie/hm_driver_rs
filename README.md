@@ -163,12 +163,12 @@ Builder 还可通过 `DriverConfig` 调整 RPC 超时（默认 20 秒）、RPC �
 | --- | --- | --- | --- | --- |
 | `arm64` | `v1.1.3` | `<= 5.1.1.2` | TCP `8012` | 仅官方参考 |
 | `arm64` | `v1.1.5` | `> 5.1.1.2` 且 `<= 5.1.1.3` | TCP `8012` | 仅官方参考 |
-| `arm64` | `v1.1.10` | `> 5.1.1.3` 且 `<= 6.0.2.1` | TCP `8012` | 仅官方参考 |
-| `arm64` | `v1.2.2` | `> 6.0.2.1` | `localabstract:uitest_socket` | **本地真机已验证** |
-| `x86_64` | `v1.1.9` | 架构优先于 UITest 版本 | TCP `8012` | 仅官方参考 |
+| `arm64` | `v1.1.12` | `> 5.1.1.3` 且 `<= 6.0.2.1` | TCP `8012` | 仅官方参考 |
+| `arm64` | `v1.2.3` | `> 6.0.2.1` | `localabstract:uitest_socket` | **API 26 真机已验证** |
+| `x86_64` | `v1.1.12` | 架构优先于 UITest 版本 | TCP `8012` | 仅官方参考 |
 
 架构会被标准化为 `arm64` 或 `x86_64`，UITest 版本要求为严格的四段式版本号。
-`x86_64` 设备固定选择 `v1.1.9`；其他已识别架构按上表的版本边界选择。
+`x86_64` 设备固定选择 `v1.1.12`；其他已识别架构按上表的版本边界选择。
 使用未完成本地验证的分支时，驱动会发出不包含设备标识的兼容性警告。
 
 ### Agent 来源
@@ -391,7 +391,7 @@ cargo test --all-features
 cargo check --no-default-features
 ```
 
-仓库还提供一个默认忽略的真机冒烟测试。它固定验证 ARM64、UITest Agent `v1.2.2`，
+仓库还提供一个默认忽略的真机冒烟测试。它固定验证 ARM64、UITest Agent `v1.2.3`，
 会读取设备状态和 Ability，执行截图、按键、滑动、多指轨迹、UI 树、XPath 和 Selector
 操作；测试设备需要安装 `com.chinadaily.har`，并包含 `EntryAbility`。
 
@@ -400,14 +400,14 @@ PowerShell：
 ```powershell
 $env:HM_DRIVER_SMOKE = "1"
 $env:HM_DRIVER_DEVICE = "<设备序列号>"
-cargo test --test smoke arm64_v122_smoke -- --ignored --nocapture
+cargo test --test smoke arm64_v123_smoke -- --ignored --nocapture
 ```
 
 类 Unix shell：
 
 ```sh
 HM_DRIVER_SMOKE=1 HM_DRIVER_DEVICE=<设备序列号> \
-  cargo test --test smoke arm64_v122_smoke -- --ignored --nocapture
+  cargo test --test smoke arm64_v123_smoke -- --ignored --nocapture
 ```
 
 真机测试会改变屏幕和前台界面。测试代码不会输出或持久化设备序列号。
@@ -442,8 +442,8 @@ HM_DRIVER_SMOKE=1 HM_DRIVER_DEVICE=<设备序列号> \
 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 
 `assets/agents/*.so` 逐字节提取自官方
-`devecotesting-hypium-6.1.0.210.zip` 软件包内的
-`xdevice_devicetest-6.1.0.210-py3-none-any.whl`，其 wheel 内原始目录为
+`devecotesting-hypium-26.0.0.400.zip` 软件包内的
+`xdevice_devicetest-26.0.0.400-py3-none-any.whl`，其 wheel 内原始目录为
 `devicetest/res/prototype/native/`。
 
 Cargo package metadata 当前声明为：

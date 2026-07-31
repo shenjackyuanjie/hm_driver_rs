@@ -116,14 +116,14 @@ impl AgentResolver {
         let architecture = normalize_architecture(architecture)?;
         let version = version.parse::<UitestVersion>()?;
         if architecture == "x86_64" {
-            let profile = self.catalog.profile("1.1.9", "x86_64")?;
+            let profile = self.catalog.profile("1.1.12", "x86_64")?;
             debug!(target: "hm_driver_rs::agent", agent = %profile.file_name, arch = %architecture, "Agent 解析结果");
             return Ok(profile);
         }
         let agent_version = if version > UitestVersion([6, 0, 2, 1]) {
-            "1.2.2"
+            "1.2.3"
         } else if version > UitestVersion([5, 1, 1, 3]) {
-            "1.1.10"
+            "1.1.12"
         } else if version > UitestVersion([5, 1, 1, 2]) {
             "1.1.5"
         } else {
@@ -246,13 +246,13 @@ fn embedded_bytes(file_name: &str) -> Option<&'static [u8]> {
     match file_name {
         "uitest_agent_v1.1.3.so" => Some(include_bytes!("../assets/agents/uitest_agent_v1.1.3.so")),
         "uitest_agent_v1.1.5.so" => Some(include_bytes!("../assets/agents/uitest_agent_v1.1.5.so")),
-        "uitest_agent_v1.1.10.so" => {
-            Some(include_bytes!("../assets/agents/uitest_agent_v1.1.10.so"))
+        "uitest_agent_v1.1.12.so" => {
+            Some(include_bytes!("../assets/agents/uitest_agent_v1.1.12.so"))
         }
-        "uitest_agent_v1.1.9.x86_64_so" => Some(include_bytes!(
-            "../assets/agents/uitest_agent_v1.1.9.x86_64_so"
+        "uitest_agent_v1.1.12.x86_64_so" => Some(include_bytes!(
+            "../assets/agents/uitest_agent_v1.1.12.x86_64_so"
         )),
-        "uitest_agent_v1.2.2.so" => Some(include_bytes!("../assets/agents/uitest_agent_v1.2.2.so")),
+        "uitest_agent_v1.2.3.so" => Some(include_bytes!("../assets/agents/uitest_agent_v1.2.3.so")),
         _ => None,
     }
 }
@@ -266,15 +266,15 @@ mod tests {
         let resolver = AgentResolver::new().unwrap();
         assert_eq!(
             resolver.resolve("arm64-v8a", "6.0.2.2").unwrap().version,
-            "1.2.2"
+            "1.2.3"
         );
         assert_eq!(
             resolver.resolve("arm64-v8a", "6.0.2.1").unwrap().version,
-            "1.1.10"
+            "1.1.12"
         );
         assert_eq!(
             resolver.resolve("arm64-v8a", "5.1.1.4").unwrap().version,
-            "1.1.10"
+            "1.1.12"
         );
         assert_eq!(
             resolver.resolve("arm64-v8a", "5.1.1.3").unwrap().version,
@@ -291,7 +291,7 @@ mod tests {
         let resolver = AgentResolver::new().unwrap();
         assert_eq!(
             resolver.resolve("x86_64", "9.9.9.9").unwrap().version,
-            "1.1.9"
+            "1.1.12"
         );
         assert!(matches!(
             resolver.resolve("arm64", "6.0.2"),

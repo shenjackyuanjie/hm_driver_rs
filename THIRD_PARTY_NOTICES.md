@@ -4,8 +4,8 @@
 
 文件：`assets/agents/*.so`
 
-来源：官方 `devecotesting-hypium-6.1.0.210.zip` 软件包中的
-`xdevice_devicetest-6.1.0.210-py3-none-any.whl`。
+来源：官方 `devecotesting-hypium-26.0.0.400.zip` 软件包中的
+`xdevice_devicetest-26.0.0.400-py3-none-any.whl`。
 
 目前尚未确认这些二进制文件的再分发许可。它们仅用于本地开发和验证，本 crate 已禁止发布。
 
