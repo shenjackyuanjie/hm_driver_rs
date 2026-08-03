@@ -267,6 +267,69 @@ impl HmDriver {
         result
     }
 
+    /// 使用一个或两个指关节点执行单次或双次敲击。
+    ///
+    /// 该能力需要 API Level 22 及以上；`points` 只能包含一到两个点，`times` 只能为 1 或 2。
+    pub async fn knuckle_knock(&self, points: &[Point], times: u8) -> Result<()> {
+        validate_knuckle_knock(points.len(), times)?;
+        self.require_api_level(22, "指关节敲击").await?;
+        let mut args: Vec<Value> = points.iter().map(|point| json!(point)).collect();
+        args.push(json!(times));
+        self.driver_call("knuckleKnock", Value::Array(args))
+            .await
+            .map(|_| ())
+    }
+
+    /// 使用绝对或归一化位置执行指关节敲击。
+    pub async fn knuckle_knock_positions(&self, positions: &[Position], times: u8) -> Result<()> {
+        validate_knuckle_knock(positions.len(), times)?;
+        self.require_api_level(22, "指关节敲击").await?;
+        let display = self.display_size().await?;
+        let points = positions
+            .iter()
+            .copied()
+            .map(|position| position.resolve(display))
+            .collect::<Result<Vec<_>>>()?;
+        self.knuckle_knock(&points, times).await
+    }
+
+    /// 使用指关节注入自定义轨迹。
+    ///
+    /// 该能力需要 API Level 22 及以上。
+    pub async fn perform_knuckle_gesture(&self, gesture: &Gesture) -> Result<()> {
+        self.require_api_level(22, "指关节轨迹").await?;
+        let reference = self.create_pointer_matrix(gesture).await?;
+        let result = self
+            .driver_call(
+                "injectKnucklePointerAction",
+                json!([reference, gesture.injection_speed_value()]),
+            )
+            .await
+            .map(|_| ());
+        self.queue_remote_reference(reference, self.generation());
+        result
+    }
+
+    /// 以指定中心、半径和速度执行指关节闭合圈选。
+    ///
+    /// 半径至少为 50 像素，速度必须位于 200 到 40000；该能力需要 API Level 22 及以上。
+    pub async fn knuckle_select(&self, center: Point, radius: u32, speed: u32) -> Result<()> {
+        let gesture = knuckle_circle_gesture(center, radius, speed)?;
+        self.perform_knuckle_gesture(&gesture).await
+    }
+
+    /// 以绝对或归一化中心位置执行指关节闭合圈选。
+    pub async fn knuckle_select_position(
+        &self,
+        center: Position,
+        radius: u32,
+        speed: u32,
+    ) -> Result<()> {
+        self.require_api_level(22, "指关节圈选").await?;
+        self.knuckle_select(self.absolute_position(center).await?, radius, speed)
+            .await
+    }
+
     /// 鼠标单击，支持同时按住最多两个键盘按键。
     pub async fn mouse_click(
         &self,
@@ -502,8 +565,11 @@ impl HmDriver {
                 "设备未提供 testhelper，无法隐藏软键盘".into(),
             ));
         }
-        let output = self.inner.hdc.shell("testhelper hide-keyboard").await?;
-        validate_hide_keyboard_output(&output.stdout)
+        match self.inner.hdc.shell("testhelper hide-keyboard").await {
+            Ok(output) => validate_hide_keyboard_output(&output.stdout),
+            Err(error) if is_no_active_keyboard_error(&error) => Ok(()),
+            Err(error) => Err(error),
+        }
     }
 
     /// 清空当前获得焦点的输入框。
@@ -599,6 +665,60 @@ fn validate_pressure(pressure: Option<f64>) -> Result<()> {
     }
 }
 
+fn validate_knuckle_knock(point_count: usize, times: u8) -> Result<()> {
+    if !(1..=2).contains(&point_count) {
+        return Err(DriverError::InvalidArgument(
+            "指关节敲击必须包含一个或两个点".into(),
+        ));
+    }
+    if !(1..=2).contains(&times) {
+        return Err(DriverError::InvalidArgument(
+            "指关节敲击次数必须为 1 或 2".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn knuckle_circle_gesture(center: Point, radius: u32, speed: u32) -> Result<Gesture> {
+    const SEGMENTS: u32 = 36;
+    if radius < 50 {
+        return Err(DriverError::InvalidArgument(
+            "指关节圈选半径不能小于 50 像素".into(),
+        ));
+    }
+    validate_motion_speed(speed)?;
+    let radius = i32::try_from(radius)
+        .map_err(|_| DriverError::InvalidArgument("指关节圈选半径超出范围".into()))?;
+    let point_at = |index: u32| -> Result<Point> {
+        let angle = std::f64::consts::TAU * f64::from(index) / f64::from(SEGMENTS);
+        let x = f64::from(center.x) + f64::from(radius) * angle.cos();
+        let y = f64::from(center.y) + f64::from(radius) * angle.sin();
+        if x < f64::from(i32::MIN)
+            || x > f64::from(i32::MAX)
+            || y < f64::from(i32::MIN)
+            || y > f64::from(i32::MAX)
+        {
+            return Err(DriverError::InvalidCoordinate(
+                "指关节圈选轨迹超出坐标范围".into(),
+            ));
+        }
+        Ok(Point::new(x.round() as i32, y.round() as i32))
+    };
+    let chord = 2.0 * f64::from(radius) * (std::f64::consts::PI / f64::from(SEGMENTS)).sin();
+    let segment_millis = ((chord * 1_000.0 / f64::from(speed)).ceil() as u64).max(10);
+    let mut path =
+        crate::GesturePath::new(Position::Absolute(point_at(0)?), Duration::from_millis(10))?;
+    for index in 1..=SEGMENTS {
+        path = path.move_to(
+            Position::Absolute(point_at(index)?),
+            Duration::from_millis(segment_millis),
+        )?;
+    }
+    Gesture::new(path)
+        .sample_interval(Duration::from_millis(10))?
+        .injection_speed(speed)
+}
+
 fn touchpad_direction(direction: SwipeDirection) -> u8 {
     match direction {
         SwipeDirection::Left => 0,
@@ -655,6 +775,14 @@ fn validate_hide_keyboard_output(output: &str) -> Result<()> {
     }
 }
 
+fn is_no_active_keyboard_error(error: &DriverError) -> bool {
+    matches!(
+        error,
+        DriverError::HdcCommand { message, .. }
+            if message.contains("Error: No active input method keyboard.")
+    )
+}
+
 #[cfg(test)]
 mod extended_input_tests {
     use super::*;
@@ -688,6 +816,45 @@ mod extended_input_tests {
             validate_hide_keyboard_output(""),
             Err(DriverError::Unsupported(_))
         ));
+        assert!(is_no_active_keyboard_error(&DriverError::HdcCommand {
+            code: Some(0),
+            message: "stdout: Error: No active input method keyboard.".into(),
+        }));
+        assert!(!is_no_active_keyboard_error(&DriverError::HdcCommand {
+            code: Some(1),
+            message: "stdout: Error: unsupported command".into(),
+        }));
+    }
+
+    #[test]
+    fn validates_knuckle_arguments_and_builds_closed_circle() {
+        assert!(validate_knuckle_knock(1, 1).is_ok());
+        assert!(validate_knuckle_knock(2, 2).is_ok());
+        for (points, times) in [(0, 1), (3, 1), (1, 0), (1, 3)] {
+            assert!(matches!(
+                validate_knuckle_knock(points, times),
+                Err(DriverError::InvalidArgument(_))
+            ));
+        }
+        assert!(matches!(
+            knuckle_circle_gesture(Point::new(100, 100), 49, 2_000),
+            Err(DriverError::InvalidArgument(_))
+        ));
+        assert!(knuckle_circle_gesture(Point::new(100, 100), 50, 199).is_err());
+        assert!(knuckle_circle_gesture(Point::new(100, 100), 50, 40_001).is_err());
+
+        let matrix = knuckle_circle_gesture(Point::new(200, 300), 50, 2_000)
+            .unwrap()
+            .compile(crate::DisplaySize {
+                width: 1_000,
+                height: 1_000,
+            })
+            .unwrap();
+        assert_eq!(matrix.len(), 1);
+        assert_eq!(matrix[0].len(), 38);
+        assert_eq!(matrix[0].first().unwrap().point, Point::new(250, 300));
+        assert_eq!(matrix[0].last().unwrap().point, Point::new(250, 300));
+        assert_eq!(matrix[0].first().unwrap().interval_millis, 10);
     }
 
     #[tokio::test]

@@ -172,6 +172,16 @@ impl Element {
         block_on(self.inner.long_click_at_for(offset_x, offset_y, duration))?
     }
 
+    /// 在控件中心执行单次或双次指关节敲击。
+    pub fn knuckle_knock(&self, times: u8) -> Result<()> {
+        block_on(self.inner.knuckle_knock(times))?
+    }
+
+    /// 以控件中心执行指关节闭合圈选。
+    pub fn knuckle_select(&self, radius: u32, speed: u32) -> Result<()> {
+        block_on(self.inner.knuckle_select(radius, speed))?
+    }
+
     /// 在控件中输入文本。
     ///
     /// 文本将输入到当前控件中，等同于逐字符输入。

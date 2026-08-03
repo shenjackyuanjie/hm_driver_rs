@@ -347,6 +347,31 @@ impl HmDriver {
         block_on(self.inner.perform_gesture(gesture))?
     }
 
+    /// 使用一个或两个指关节点执行单次或双次敲击。
+    pub fn knuckle_knock(&self, points: &[Point], times: u8) -> Result<()> {
+        block_on(self.inner.knuckle_knock(points, times))?
+    }
+
+    /// 使用绝对或归一化位置执行指关节敲击。
+    pub fn knuckle_knock_positions(&self, positions: &[Position], times: u8) -> Result<()> {
+        block_on(self.inner.knuckle_knock_positions(positions, times))?
+    }
+
+    /// 使用指关节注入自定义轨迹。
+    pub fn perform_knuckle_gesture(&self, gesture: &Gesture) -> Result<()> {
+        block_on(self.inner.perform_knuckle_gesture(gesture))?
+    }
+
+    /// 以指定中心、半径和速度执行指关节闭合圈选。
+    pub fn knuckle_select(&self, center: Point, radius: u32, speed: u32) -> Result<()> {
+        block_on(self.inner.knuckle_select(center, radius, speed))?
+    }
+
+    /// 以绝对或归一化中心位置执行指关节闭合圈选。
+    pub fn knuckle_select_position(&self, center: Position, radius: u32, speed: u32) -> Result<()> {
+        block_on(self.inner.knuckle_select_position(center, radius, speed))?
+    }
+
     /// 鼠标单击，支持最多两个组合键。
     pub fn mouse_click(&self, point: Point, button: MouseButton, keys: &[KeyCode]) -> Result<()> {
         block_on(self.inner.mouse_click(point, button, keys))?

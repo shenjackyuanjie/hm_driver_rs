@@ -196,6 +196,8 @@ Builder 还可通过 `DriverConfig` 调整 RPC 超时（默认 20 秒）、RPC �
 - 直线滑动、拖拽、抛滑、按方向滑动和 `wait_for_idle()`；
 - `Gesture`/`GesturePath` 自定义多指轨迹，最多十根手指。采样间隔支持 10–100 毫秒，
   注入速度支持 200–40000；
+- API Level 22 以上支持单/双指关节的单次或双次敲击、指关节自定义轨迹和闭合圈选，
+  并同时提供绝对坐标、归一化位置、控件中心及阻塞接口；
 - 鼠标左/中/右键点击、双击、长按、滚轮、移动和拖拽，点击与滚轮支持最多两个组合键；
 - 触控笔点击、双击、带压力长按、滑动和自定义轨迹；
 - 触控板多指四向滑动及终点停留，手表表冠正反向旋转；
@@ -218,6 +220,12 @@ async fn gestures(driver: &hm_driver_rs::HmDriver) -> Result<()> {
         .await?;
     driver
         .swipe_direction(SwipeDirection::Up, SwipeArea::FullScreen, 0.8, 2_000)
+        .await?;
+    driver
+        .knuckle_knock_positions(&[Position::normalized(0.5, 0.5)?], 1)
+        .await?;
+    driver
+        .knuckle_select_position(Position::normalized(0.5, 0.5)?, 80, 2_000)
         .await?;
 
     let path = GesturePath::new(

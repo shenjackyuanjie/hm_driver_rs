@@ -342,6 +342,122 @@ async fn submits_pointer_matrix_before_injecting_gesture() {
 }
 
 #[tokio::test]
+async fn knuckle_calls_use_official_protocol_and_queue_pointer_matrix() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let calls = Arc::new(TokioMutex::new(Vec::new()));
+    let server_calls = calls.clone();
+    tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let (reader, mut writer) = stream.into_split();
+        let mut lines = BufReader::new(reader).lines();
+        while let Some(line) = lines.next_line().await.unwrap() {
+            let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+            let api = request["params"]["api"].as_str().unwrap().to_owned();
+            server_calls.lock().await.push((
+                api.clone(),
+                request["params"]["this"].clone(),
+                request["params"]["args"].clone(),
+            ));
+            let result = match api.as_str() {
+                "Driver.getDisplaySize" => json!({"x": 1000, "y": 2000}),
+                "PointerMatrix.create" => json!("PointerMatrix#knuckle"),
+                _ => serde_json::Value::Null,
+            };
+            let response = json!({
+                "request_id": request["request_id"],
+                "result": result,
+                "exception": null
+            });
+            writer
+                .write_all(serde_json::to_string(&response).unwrap().as_bytes())
+                .await
+                .unwrap();
+            writer.write_all(b"\n").await.unwrap();
+            if api == "Driver.injectKnucklePointerAction" {
+                break;
+            }
+        }
+    });
+    let rpc = RpcClient::connect(
+        port,
+        Duration::from_secs(1),
+        Duration::from_secs(1),
+        1024 * 1024,
+    )
+    .await
+    .unwrap();
+    let driver = HmDriver::with_test_rpc_api_level(rpc, ApiDialect::Modern, Some(22));
+    driver
+        .knuckle_knock(&[crate::Point::new(10, 20), crate::Point::new(30, 40)], 2)
+        .await
+        .unwrap();
+    let path = GesturePath::new(
+        Position::Absolute(crate::Point::new(50, 60)),
+        Duration::from_millis(10),
+    )
+    .unwrap();
+    driver
+        .perform_knuckle_gesture(&Gesture::new(path).injection_speed(1_500).unwrap())
+        .await
+        .unwrap();
+
+    let calls = calls.lock().await;
+    assert_eq!(
+        calls[0],
+        (
+            "Driver.knuckleKnock".into(),
+            json!("Driver#0"),
+            json!([{"x": 10, "y": 20}, {"x": 30, "y": 40}, 2])
+        )
+    );
+    assert_eq!(calls[1].0, "Driver.getDisplaySize");
+    assert_eq!(calls[2].0, "PointerMatrix.create");
+    assert_eq!(calls[2].2, json!([1, 2]));
+    assert_eq!(calls[3].0, "PointerMatrix.setPoint");
+    assert_eq!(calls[3].1, json!("PointerMatrix#knuckle"));
+    assert_eq!(calls[4].0, "PointerMatrix.setPoint");
+    assert_eq!(
+        calls[5],
+        (
+            "Driver.injectKnucklePointerAction".into(),
+            json!("Driver#0"),
+            json!(["PointerMatrix#knuckle", 1500])
+        )
+    );
+    assert_eq!(driver.queued_reference_count(), 1);
+}
+
+#[tokio::test]
+async fn knuckle_calls_reject_known_api_level_below_22() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let _connection = listener.accept().await.unwrap();
+        std::future::pending::<()>().await;
+    });
+    let rpc = RpcClient::connect(port, Duration::from_secs(1), Duration::from_secs(1), 4096)
+        .await
+        .unwrap();
+    let driver = HmDriver::with_test_rpc_api_level(rpc, ApiDialect::Modern, Some(21));
+    assert!(matches!(
+        driver.knuckle_knock(&[crate::Point::new(10, 20)], 1).await,
+        Err(DriverError::Unsupported(_))
+    ));
+    let gesture = Gesture::new(
+        GesturePath::new(
+            Position::Absolute(crate::Point::new(10, 20)),
+            Duration::from_millis(10),
+        )
+        .unwrap(),
+    );
+    assert!(matches!(
+        driver.perform_knuckle_gesture(&gesture).await,
+        Err(DriverError::Unsupported(_))
+    ));
+}
+
+#[tokio::test]
 async fn submits_extended_input_methods_with_official_argument_shapes() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
     let port = listener.local_addr().unwrap().port();

@@ -3,8 +3,8 @@
 //! 测试默认忽略，并且仅在 `HM_DRIVER_SMOKE=1` 时执行。测试不会输出或持久化设备标识。
 
 use hm_driver_rs::{
-    AppIdentifier, DeviceSelector, DeviceSerial, Gesture, GesturePath, HmDriver, KeyCode,
-    NormalizedPoint, Position, ScreenshotMethod, Selector, SwipeArea, SwipeDirection,
+    AppIdentifier, DeviceSelector, DeviceSerial, DriverError, Gesture, GesturePath, HmDriver,
+    KeyCode, NormalizedPoint, Position, ScreenshotMethod, Selector, SwipeArea, SwipeDirection,
 };
 use std::time::Duration;
 
@@ -80,6 +80,32 @@ async fn arm64_v123_smoke() -> hm_driver_rs::Result<()> {
     driver
         .perform_gesture(&Gesture::new(left).add_path(right)?)
         .await?;
+
+    eprintln!("阶段：Hypium 26 显示与指关节输入");
+    driver
+        .long_click_position_for(
+            Position::Normalized(NormalizedPoint::new(0.5, 0.5)?),
+            Duration::from_millis(100),
+        )
+        .await?;
+    driver
+        .knuckle_knock_positions(&[Position::Normalized(NormalizedPoint::new(0.5, 0.5)?)], 1)
+        .await?;
+    let knuckle_path = GesturePath::new(
+        Position::Normalized(NormalizedPoint::new(0.48, 0.5)?),
+        Duration::from_millis(10),
+    )?
+    .move_to(
+        Position::Normalized(NormalizedPoint::new(0.52, 0.5)?),
+        Duration::from_millis(50),
+    )?;
+    driver
+        .perform_knuckle_gesture(&Gesture::new(knuckle_path))
+        .await?;
+    match driver.hide_keyboard().await {
+        Ok(()) | Err(DriverError::Unsupported(_)) => {}
+        Err(error) => return Err(error),
+    }
 
     eprintln!("阶段：UI 树和控件便利方法");
     let tree = driver.ui_tree().await?;

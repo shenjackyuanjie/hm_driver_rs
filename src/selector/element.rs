@@ -355,6 +355,20 @@ impl Element {
             .await
     }
 
+    /// 在控件中心执行单次或双次指关节敲击。
+    pub async fn knuckle_knock(&self, times: u8) -> Result<()> {
+        self.driver
+            .knuckle_knock(&[self.bounds_center().await?], times)
+            .await
+    }
+
+    /// 以控件中心执行指关节闭合圈选。
+    pub async fn knuckle_select(&self, radius: u32, speed: u32) -> Result<()> {
+        self.driver
+            .knuckle_select(self.bounds_center().await?, radius, speed)
+            .await
+    }
+
     /// 一次性读取控件的全部属性。
     ///
     /// 与逐个调用属性方法相比，此方法在一次往返中获取所有信息，
