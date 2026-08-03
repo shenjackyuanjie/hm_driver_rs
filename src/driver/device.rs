@@ -13,20 +13,23 @@ impl HmDriver {
     /// 获取当前显示设备的尺寸（宽度 x 高度，单位为像素）。
     pub async fn display_size(&self) -> Result<DisplaySize> {
         let value = self.driver_call("getDisplaySize", json!([])).await?;
-        let width = value
-            .get("x")
-            .and_then(serde_json::Value::as_u64)
-            .and_then(|v| u32::try_from(v).ok());
-        let height = value
-            .get("y")
-            .and_then(serde_json::Value::as_u64)
-            .and_then(|v| u32::try_from(v).ok());
-        let result = match (width, height) {
-            (Some(width), Some(height)) => Ok(DisplaySize { width, height }),
-            _ => Err(DriverError::Protocol("显示尺寸响应无效".into())),
-        };
-        trace!(target: "hm_driver_rs::device", ?result, "display_size");
-        result
+        parse_display_size(&value)
+    }
+
+    /// 获取指定显示设备的尺寸（宽度 x 高度，单位为像素）。
+    ///
+    /// `display_id` 必须大于 0；该能力需要 API Level 18 及以上。
+    pub async fn display_size_for(&self, display_id: u32) -> Result<DisplaySize> {
+        if display_id == 0 {
+            return Err(DriverError::InvalidArgument(
+                "显示设备 ID 必须大于 0".into(),
+            ));
+        }
+        self.require_api_level(18, "指定显示设备尺寸").await?;
+        let value = self
+            .driver_call("getDisplaySize", json!([display_id]))
+            .await?;
+        parse_display_size(&value)
     }
 
     /// 获取当前显示旋转角度。
@@ -141,6 +144,23 @@ impl HmDriver {
     }
 }
 
+fn parse_display_size(value: &serde_json::Value) -> Result<DisplaySize> {
+    let width = value
+        .get("x")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|v| u32::try_from(v).ok());
+    let height = value
+        .get("y")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|v| u32::try_from(v).ok());
+    let result = match (width, height) {
+        (Some(width), Some(height)) => Ok(DisplaySize { width, height }),
+        _ => Err(DriverError::Protocol("显示尺寸响应无效".into())),
+    };
+    trace!(target: "hm_driver_rs::device", ?result, "display_size");
+    result
+}
+
 /// 仅在屏幕为 Awake 时才需要发送电源键关屏。
 pub(super) fn should_toggle_for_screen_off(state: &ScreenState) -> Result<bool> {
     match state {
@@ -192,4 +212,24 @@ fn parse_non_loopback_ip(output: &str, pattern: &Regex) -> Option<IpAddr> {
         .captures_iter(output)
         .filter_map(|capture| capture.get(1)?.as_str().parse::<IpAddr>().ok())
         .find(|address| !address.is_loopback() && !address.is_unspecified())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_display_size_and_rejects_invalid_shapes() {
+        assert_eq!(
+            parse_display_size(&json!({"x": 1320, "y": 2856})).unwrap(),
+            DisplaySize {
+                width: 1320,
+                height: 2856
+            }
+        );
+        assert!(matches!(
+            parse_display_size(&json!({"width": 1320, "height": 2856})),
+            Err(DriverError::Protocol(_))
+        ));
+    }
 }

@@ -157,6 +157,21 @@ impl Element {
         block_on(self.inner.long_click_at(offset_x, offset_y))?
     }
 
+    /// 在控件中心长按给定时长。
+    pub fn long_click_for(&self, duration: std::time::Duration) -> Result<()> {
+        block_on(self.inner.long_click_for(duration))?
+    }
+
+    /// 在控件相对偏移位置长按给定时长。
+    pub fn long_click_at_for(
+        &self,
+        offset_x: f64,
+        offset_y: f64,
+        duration: std::time::Duration,
+    ) -> Result<()> {
+        block_on(self.inner.long_click_at_for(offset_x, offset_y, duration))?
+    }
+
     /// 在控件中输入文本。
     ///
     /// 文本将输入到当前控件中，等同于逐字符输入。

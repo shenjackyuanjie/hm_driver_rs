@@ -185,19 +185,24 @@ Builder 还可通过 `DriverConfig` 调整 RPC 超时（默认 20 秒）、RPC �
 
 - `device_info()`：产品名、型号、品牌、API 版本、系统版本、CPU ABI、WLAN IP、
   显示尺寸和旋转方向；
-- `display_size()`、`display_rotation()`、`set_display_rotation()`；
+- `display_size()`、API Level 18 以上可用的 `display_size_for(display_id)`、
+  `display_rotation()`、`set_display_rotation()`；
 - `screen_on()`、`screen_off()`、`toggle_screen_power()`、`screen_state()` 和
   `unlock()`；
 - `press_key_code()` 使用完整的 `KeyCode` 按键枚举，`press_key(u32)` 用于未类型化的
   平台扩展码（接受 `0..=3200`）；
 - `press_key_combination()` 支持两个或三个按键，另有 `go_back()` 和 `go_home()`；
-- 绝对坐标和归一化坐标的点击、双击、长按；
+- 绝对坐标和归一化坐标的点击、双击、长按，以及可指定持续时间的长按；
 - 直线滑动、拖拽、抛滑、按方向滑动和 `wait_for_idle()`；
 - `Gesture`/`GesturePath` 自定义多指轨迹，最多十根手指。采样间隔支持 10–100 毫秒，
   注入速度支持 200–40000；
 - 鼠标左/中/右键点击、双击、长按、滚轮、移动和拖拽，点击与滚轮支持最多两个组合键；
 - 触控笔点击、双击、带压力长按、滑动和自定义轨迹；
-- 触控板多指四向滑动及终点停留，手表表冠正反向旋转。
+- 触控板多指四向滑动及终点停留，手表表冠正反向旋转；
+- `hide_keyboard()` 隐藏软键盘，`clear_text_on_current_cursor()` 清空当前焦点输入框。
+
+`hide_keyboard()` 依赖设备端 `testhelper`。系统未提供该工具时会返回
+`DriverError::Unsupported`，不会把 shell 错误当作成功。
 
 `Position::normalized(x, y)` 的两个值都必须位于 `0.0..=1.0`，会按当前显示区域换算
 到有效像素范围 `[0, width - 1]` 和 `[0, height - 1]`。方向滑动支持全屏、绝对坐标区域

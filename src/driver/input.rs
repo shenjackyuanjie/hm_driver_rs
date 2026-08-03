@@ -104,6 +104,26 @@ impl HmDriver {
             .await
     }
 
+    /// 在指定绝对坐标处长按给定时长。
+    pub async fn long_click_for(&self, point: Point, duration: Duration) -> Result<()> {
+        let millis = duration_millis(duration, "触控长按时长")?;
+        self.inner
+            .hdc
+            .shell(long_click_command(point, millis))
+            .await
+            .map(|_| ())
+    }
+
+    /// 在指定绝对或归一化位置长按给定时长。
+    pub async fn long_click_position_for(
+        &self,
+        position: Position,
+        duration: Duration,
+    ) -> Result<()> {
+        self.long_click_for(self.absolute_position(position).await?, duration)
+            .await
+    }
+
     /// 从起点滑动到终点，`speed` 为滑动速度（200–40000 像素/秒）。
     pub async fn swipe(&self, from: Point, to: Point, speed: u32) -> Result<()> {
         trace!(target: "hm_driver_rs::input", from = %format!("({},{})", from.x, from.y), to = %format!("({},{})", to.x, to.y), speed, "滑动");
@@ -472,6 +492,30 @@ impl HmDriver {
             .await
     }
 
+    /// 隐藏当前系统软键盘。
+    ///
+    /// 该能力依赖设备端 `testhelper`；工具不存在时返回 [`DriverError::Unsupported`]。
+    pub async fn hide_keyboard(&self) -> Result<()> {
+        let probe = self.inner.hdc.shell("command -v testhelper").await?;
+        if probe.stdout.trim().is_empty() {
+            return Err(DriverError::Unsupported(
+                "设备未提供 testhelper，无法隐藏软键盘".into(),
+            ));
+        }
+        let output = self.inner.hdc.shell("testhelper hide-keyboard").await?;
+        validate_hide_keyboard_output(&output.stdout)
+    }
+
+    /// 清空当前获得焦点的输入框。
+    pub async fn clear_text_on_current_cursor(&self) -> Result<()> {
+        self.press_key_combination(&[KeyCode::CtrlLeft, KeyCode::A])
+            .await?;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        self.press_key_code(KeyCode::Delete).await?;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        Ok(())
+    }
+
     /// 等待 UI 连续空闲指定时长，最长等待 `timeout`。
     pub async fn wait_for_idle(&self, idle_time: Duration, timeout: Duration) -> Result<()> {
         trace!(target: "hm_driver_rs::input", ?idle_time, ?timeout, "等待 UI 空闲");
@@ -584,6 +628,33 @@ fn duration_millis(duration: Duration, name: &str) -> Result<u32> {
         .map_err(|_| DriverError::InvalidArgument(format!("{name}超出 u32 毫秒范围")))
 }
 
+fn long_click_command(point: Point, millis: u32) -> String {
+    format!(
+        "uinput -T -d {} {} -i {} -u {} {}",
+        point.x, point.y, millis, point.x, point.y
+    )
+}
+
+fn validate_hide_keyboard_output(output: &str) -> Result<()> {
+    let normalized = output.trim();
+    let lower = normalized.to_ascii_lowercase();
+    if normalized.contains("Keyboard hidden successfully.")
+        || normalized.contains("Error: No active input method keyboard.")
+        || (!normalized.is_empty() && !lower.contains("error") && !lower.contains("fail"))
+    {
+        Ok(())
+    } else {
+        Err(DriverError::Unsupported(format!(
+            "设备无法隐藏软键盘：{}",
+            if normalized.is_empty() {
+                "testhelper 未返回结果"
+            } else {
+                normalized
+            }
+        )))
+    }
+}
+
 #[cfg(test)]
 mod extended_input_tests {
     use super::*;
@@ -592,6 +663,32 @@ mod extended_input_tests {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::TcpListener;
     use tokio::sync::Mutex;
+
+    #[test]
+    fn builds_touch_long_click_command_and_validates_duration() {
+        assert_eq!(
+            long_click_command(Point::new(10, 20), 1_500),
+            "uinput -T -d 10 20 -i 1500 -u 10 20"
+        );
+        assert!(matches!(
+            duration_millis(Duration::ZERO, "触控长按时长"),
+            Err(DriverError::InvalidArgument(_))
+        ));
+    }
+
+    #[test]
+    fn accepts_idempotent_hide_keyboard_outputs() {
+        assert!(validate_hide_keyboard_output("Keyboard hidden successfully.\n").is_ok());
+        assert!(validate_hide_keyboard_output("Error: No active input method keyboard.\n").is_ok());
+        assert!(matches!(
+            validate_hide_keyboard_output("Error: unsupported command"),
+            Err(DriverError::Unsupported(_))
+        ));
+        assert!(matches!(
+            validate_hide_keyboard_output(""),
+            Err(DriverError::Unsupported(_))
+        ));
+    }
 
     #[tokio::test]
     async fn sends_mouse_pen_touchpad_and_crown_calls() {

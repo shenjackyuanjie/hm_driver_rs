@@ -149,6 +149,11 @@ impl HmDriver {
         block_on(self.inner.display_size())?
     }
 
+    /// 获取指定显示设备的宽高尺寸。
+    pub fn display_size_for(&self, display_id: u32) -> Result<DisplaySize> {
+        block_on(self.inner.display_size_for(display_id))?
+    }
+
     /// 获取设备屏幕当前的旋转方向。
     pub fn display_rotation(&self) -> Result<DisplayRotation> {
         block_on(self.inner.display_rotation())?
@@ -259,6 +264,16 @@ impl HmDriver {
     /// 在指定位置方向处长按。
     pub fn long_click_position(&self, position: Position) -> Result<()> {
         block_on(self.inner.long_click_position(position))?
+    }
+
+    /// 在指定绝对坐标处长按给定时长。
+    pub fn long_click_for(&self, point: Point, duration: Duration) -> Result<()> {
+        block_on(self.inner.long_click_for(point, duration))?
+    }
+
+    /// 在指定绝对或归一化位置长按给定时长。
+    pub fn long_click_position_for(&self, position: Position, duration: Duration) -> Result<()> {
+        block_on(self.inner.long_click_position_for(position, duration))?
     }
 
     /// 从起点到终点执行滑动操作（使用绝对坐标）。
@@ -452,6 +467,16 @@ impl HmDriver {
     /// 文本会直接输入到当前获得焦点的输入控件中。
     pub fn input_text(&self, text: &str) -> Result<()> {
         block_on(self.inner.input_text(text))?
+    }
+
+    /// 隐藏当前系统软键盘。
+    pub fn hide_keyboard(&self) -> Result<()> {
+        block_on(self.inner.hide_keyboard())?
+    }
+
+    /// 清空当前获得焦点的输入框。
+    pub fn clear_text_on_current_cursor(&self) -> Result<()> {
+        block_on(self.inner.clear_text_on_current_cursor())?
     }
 
     /// 等待设备进入空闲状态。

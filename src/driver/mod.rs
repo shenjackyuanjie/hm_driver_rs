@@ -345,6 +345,17 @@ impl HmDriver {
         Ok(state.api_level)
     }
 
+    pub(crate) async fn require_api_level(&self, required: u32, capability: &str) -> Result<()> {
+        if let Some(level) = self.api_level().await?
+            && level < required
+        {
+            return Err(DriverError::Unsupported(format!(
+                "{capability} 需要 API Level {required}，当前为 {level}"
+            )));
+        }
+        Ok(())
+    }
+
     /// 直接调用任意 Hypium RPC API。
     ///
     /// `api` 为完整方法名（如 `"Driver.click"`），`this` 为可选的远端对象引用，

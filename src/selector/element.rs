@@ -336,6 +336,25 @@ impl Element {
             .await
     }
 
+    /// 在控件中心长按给定时长。
+    pub async fn long_click_for(&self, duration: Duration) -> Result<()> {
+        self.driver
+            .long_click_for(self.bounds_center().await?, duration)
+            .await
+    }
+
+    /// 在控件内（或控件外）的相对偏移位置长按给定时长。
+    pub async fn long_click_at_for(
+        &self,
+        offset_x: f64,
+        offset_y: f64,
+        duration: Duration,
+    ) -> Result<()> {
+        self.driver
+            .long_click_for(self.point_at(offset_x, offset_y).await?, duration)
+            .await
+    }
+
     /// 一次性读取控件的全部属性。
     ///
     /// 与逐个调用属性方法相比，此方法在一次往返中获取所有信息，

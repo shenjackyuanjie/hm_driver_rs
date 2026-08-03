@@ -112,6 +112,69 @@ fn screen_off_only_toggles_an_awake_display() {
 }
 
 #[tokio::test]
+async fn display_size_for_checks_api_level_and_sends_display_id() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let calls = Arc::new(TokioMutex::new(Vec::new()));
+    let server_calls = calls.clone();
+    tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let (reader, mut writer) = stream.into_split();
+        let mut lines = BufReader::new(reader).lines();
+        let request: serde_json::Value =
+            serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+        server_calls.lock().await.push((
+            request["params"]["api"].clone(),
+            request["params"]["args"].clone(),
+        ));
+        let response = json!({
+            "request_id": request["request_id"],
+            "result": {"x": 1200, "y": 800},
+            "exception": null
+        });
+        writer
+            .write_all(serde_json::to_string(&response).unwrap().as_bytes())
+            .await
+            .unwrap();
+        writer.write_all(b"\n").await.unwrap();
+    });
+    let rpc = RpcClient::connect(port, Duration::from_secs(1), Duration::from_secs(1), 4096)
+        .await
+        .unwrap();
+    let driver = HmDriver::with_test_rpc_api_level(rpc, ApiDialect::Modern, Some(18));
+    assert_eq!(
+        driver.display_size_for(2).await.unwrap(),
+        crate::DisplaySize {
+            width: 1200,
+            height: 800
+        }
+    );
+    assert_eq!(
+        *calls.lock().await,
+        vec![(json!("Driver.getDisplaySize"), json!([2]))]
+    );
+
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let _connection = listener.accept().await.unwrap();
+        std::future::pending::<()>().await;
+    });
+    let rpc = RpcClient::connect(port, Duration::from_secs(1), Duration::from_secs(1), 4096)
+        .await
+        .unwrap();
+    let legacy = HmDriver::with_test_rpc_api_level(rpc, ApiDialect::Modern, Some(17));
+    assert!(matches!(
+        legacy.display_size_for(1).await,
+        Err(DriverError::Unsupported(_))
+    ));
+    assert!(matches!(
+        legacy.display_size_for(0).await,
+        Err(DriverError::InvalidArgument(_))
+    ));
+}
+
+#[tokio::test]
 async fn generic_wait_honors_condition_and_deadline() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
     let port = listener.local_addr().unwrap().port();
