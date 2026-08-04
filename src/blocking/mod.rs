@@ -21,7 +21,7 @@
 // 私有子模块
 // ---------------------------------------------------------------------------
 
-/// 底层 driver 实现，封装 `fantoccini::Client` 的同步操作。
+/// Driver 同步操作封装。
 mod driver;
 /// 元素（`Element`）的同步操作封装。
 mod element;
@@ -33,9 +33,9 @@ mod xpath;
 // 公开的类型导出
 // ---------------------------------------------------------------------------
 
-/// WebDriver 客户端，提供同步的浏览器自动化操作。
+/// HarmonyOS Driver 的同步阻塞门面。
 pub use driver::{HmDriver, HmDriverBuilder};
-/// 页面元素，提供同步的元素交互方法（点击、输入、属性获取等）。
+/// UI 控件的同步操作封装。
 pub use element::Element;
 /// 窗口对象的同步操作封装。
 pub use window::UiWindow;
@@ -45,6 +45,7 @@ pub use xpath::XPathElement;
 use crate::Result;
 use std::future::Future;
 use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 use tracing::{debug, trace};
 
@@ -80,11 +81,7 @@ pub static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 /// 在 `RUNTIME.set()` 成功但后续 `RUNTIME.get()` 返回 `None` 时 panic。
 /// 这在当前实现逻辑下不应发生，属于防御性检查。
 fn block_on<F: Future>(future: F) -> Result<F::Output> {
-    // 检测是否已在 Tokio 异步上下文中 —— 避免在异步执行器内阻塞导致死锁
-    if tokio::runtime::Handle::try_current().is_ok() {
-        debug!(target: "hm_driver_rs::blocking", "在异步上下文中调用 block_on，拒绝执行");
-        return Err(crate::DriverError::BlockingInAsyncContext);
-    }
+    reject_async_context()?;
 
     // 获取或初始化全局 Tokio runtime
     let runtime = if let Some(runtime) = RUNTIME.get() {
@@ -102,6 +99,35 @@ fn block_on<F: Future>(future: F) -> Result<F::Output> {
     Ok(runtime.block_on(future))
 }
 
+/// 拒绝从 Tokio runtime 内调用同步阻塞门面。
+fn reject_async_context() -> Result<()> {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        debug!(target: "hm_driver_rs::blocking", "在异步上下文中调用同步阻塞 API，拒绝执行");
+        return Err(crate::DriverError::BlockingInAsyncContext);
+    }
+    Ok(())
+}
+
+fn wait_until<F>(timeout: Duration, interval: Duration, mut condition: F) -> Result<bool>
+where
+    F: FnMut() -> Result<bool>,
+{
+    reject_async_context()?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        if Instant::now() >= deadline {
+            return Ok(false);
+        }
+        if condition()? {
+            return Ok(true);
+        }
+        let now = Instant::now();
+        if now < deadline {
+            std::thread::sleep(std::cmp::min(interval, deadline - now));
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 单元测试
 // ---------------------------------------------------------------------------
@@ -109,6 +135,29 @@ fn block_on<F: Future>(future: F) -> Result<F::Output> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blocking_wait_condition_runs_outside_tokio_context() {
+        let result = wait_until(Duration::from_millis(20), Duration::from_millis(1), || {
+            assert!(tokio::runtime::Handle::try_current().is_err());
+            Ok(true)
+        });
+        assert!(result.unwrap());
+    }
+
+    #[tokio::test]
+    async fn blocking_wait_rejects_async_context_without_running_condition() {
+        let mut condition_ran = false;
+        let result = wait_until(Duration::from_secs(1), Duration::from_millis(1), || {
+            condition_ran = true;
+            Ok(true)
+        });
+        assert!(matches!(
+            result,
+            Err(crate::DriverError::BlockingInAsyncContext)
+        ));
+        assert!(!condition_ran);
+    }
 
     /// 验证在 Tokio 异步上下文中调用 `block_on` 会返回正确的错误。
     ///

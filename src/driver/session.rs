@@ -109,11 +109,7 @@ pub fn extract_four_part_version(output: &str) -> Result<String> {
 }
 
 /// 确保设备端 Agent 已部署并运行：校验 SHA-256 → 推送/更新 → 启动 singleness daemon。
-pub async fn ensure_agent(
-    hdc: &HdcRunner,
-    profile: &AgentProfile,
-    local: &Path,
-) -> Result<()> {
+pub async fn ensure_agent(hdc: &HdcRunner, profile: &AgentProfile, local: &Path) -> Result<()> {
     info!(target: "hm_driver_rs::session", agent_version = %profile.version, "部署/启动 Agent");
     if remote_agent_matches(hdc, profile).await {
         if daemon_running(hdc).await.unwrap_or(false) {

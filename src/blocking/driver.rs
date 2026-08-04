@@ -287,6 +287,11 @@ impl HmDriver {
         block_on(self.inner.swipe(from, to, speed))?
     }
 
+    /// 从起点到终点按指定持续时间滑动（毫秒）。
+    pub fn swipe_with_duration_ms(&self, from: Point, to: Point, duration_ms: u32) -> Result<()> {
+        block_on(self.inner.swipe_with_duration_ms(from, to, duration_ms))?
+    }
+
     /// 从起点到终点执行滑动操作（使用位置方向）。
     pub fn swipe_positions(&self, from: Position, to: Position, speed: u32) -> Result<()> {
         block_on(self.inner.swipe_positions(from, to, speed))?
@@ -756,14 +761,11 @@ impl HmDriver {
     /// 等待直到条件函数返回 `true`，超时时间内返回结果。
     ///
     /// 条件函数会在循环中被反复调用，函数应返回 `Result<bool>`。
-    pub fn wait_until<F>(&self, timeout: Duration, mut condition: F) -> Result<bool>
+    pub fn wait_until<F>(&self, timeout: Duration, condition: F) -> Result<bool>
     where
         F: FnMut() -> Result<bool>,
     {
-        block_on(
-            self.inner
-                .wait_until(timeout, || std::future::ready(condition())),
-        )?
+        super::wait_until(timeout, Duration::from_millis(100), condition)
     }
 
     /// 等待直到条件函数返回 `true`，可自定义轮询间隔。
@@ -777,15 +779,12 @@ impl HmDriver {
         &self,
         timeout: Duration,
         interval: Duration,
-        mut condition: F,
+        condition: F,
     ) -> Result<bool>
     where
         F: FnMut() -> Result<bool>,
     {
-        block_on(
-            self.inner
-                .wait_until_with_interval(timeout, interval, || std::future::ready(condition())),
-        )?
+        super::wait_until(timeout, interval, condition)
     }
 
     /// 等待直到 XPath 表达式匹配的元素出现。
