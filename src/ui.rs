@@ -20,6 +20,26 @@ pub struct UiNode {
 }
 
 impl UiNode {
+    /// 以借用形式读取字符串属性，避免遍历 UI 树时重复分配字符串。
+    ///
+    /// 属性值不是 JSON 字符串时返回 `None`；需要兼容布尔、数值等值时请使用
+    /// [`attribute`](Self::attribute)。
+    pub fn attribute_str(&self, name: &str) -> Option<&str> {
+        self.attributes
+            .get(name)
+            .or_else(|| self.extra.get(name))
+            .and_then(Value::as_str)
+    }
+
+    /// 读取布尔属性，兼容 dumpLayout 使用的 JSON 布尔值和 `"true"`/`"false"` 字符串。
+    pub fn attribute_bool(&self, name: &str) -> Option<bool> {
+        match self.attributes.get(name).or_else(|| self.extra.get(name)) {
+            Some(Value::Bool(value)) => Some(*value),
+            Some(Value::String(value)) => value.parse().ok(),
+            _ => None,
+        }
+    }
+
     /// 读取节点属性，优先使用 `attributes` 对象。
     pub fn attribute(&self, name: &str) -> Option<String> {
         self.attributes
@@ -150,6 +170,26 @@ impl UiNode {
     ) -> Option<(&UiNode, Vec<usize>)> {
         let mut path = Vec::new();
         self.find_hierarchy_ref(&predicate, &mut path)
+    }
+
+    /// 查找首个匹配节点对应的可点击目标。
+    ///
+    /// 优先返回匹配节点自身或其最近的、带 bounds 的可点击祖先。若父级没有声明
+    /// `clickable=true`，则回退到匹配节点本身（只要它具有 bounds）。这适用于
+    /// ArkUI 将可点击性挂在容器、文字位于子节点的常见布局。
+    pub fn find_click_target(&self, predicate: impl Fn(&UiNode) -> bool) -> Option<&UiNode> {
+        let (matched, mut hierarchy) = self.find_hierarchy(predicate)?;
+        loop {
+            let candidate = self.at_hierarchy(&hierarchy)?;
+            if candidate.attribute_bool("clickable") == Some(true) && candidate.bounds().is_some() {
+                return Some(candidate);
+            }
+            if hierarchy.is_empty() {
+                break;
+            }
+            hierarchy.pop();
+        }
+        matched.bounds().map(|_| matched)
     }
 
     fn find_hierarchy_ref<'a>(
@@ -346,6 +386,43 @@ mod tests {
                 bottom: 40
             })
         );
+    }
+
+    #[test]
+    fn 借用字符串属性并找到可点击祖先() {
+        let root: UiNode = serde_json::from_value(json!({
+            "attributes": {"type": "Root", "visible": true},
+            "children": [{
+                "attributes": {
+                    "type": "Column", "clickable": "true",
+                    "bounds": "[0,0][100,50]"
+                },
+                "children": [{
+                    "attributes": {
+                        "type": "Text", "text": "新鲜应用",
+                        "bounds": "[10,10][50,30]"
+                    },
+                    "children": []
+                }]
+            }]
+        }))
+        .unwrap();
+
+        assert_eq!(
+            root.find(|node| node.attribute_str("text") == Some("新鲜应用"))
+                .unwrap()
+                .attribute_str("text"),
+            Some("新鲜应用")
+        );
+        assert_eq!(
+            root.at_hierarchy(&[0]).unwrap().attribute_bool("clickable"),
+            Some(true)
+        );
+        assert_eq!(root.attribute_bool("visible"), Some(true));
+        let target = root
+            .find_click_target(|node| node.attribute_str("text") == Some("新鲜应用"))
+            .unwrap();
+        assert_eq!(target.node_type().as_deref(), Some("Column"));
     }
 
     #[test]
