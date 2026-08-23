@@ -619,6 +619,16 @@ impl HmDriver {
         block_on(self.inner.current_app())?
     }
 
+    /// 获取所有前台任务的应用和 Ability。
+    pub fn foreground_apps(&self) -> Result<Vec<(AppIdentifier, String)>> {
+        block_on(self.inner.foreground_apps())?
+    }
+
+    /// 判断指定应用是否处于任一前台任务中。
+    pub fn is_app_foreground(&self, bundle: &AppIdentifier) -> Result<bool> {
+        block_on(self.inner.is_app_foreground(bundle))?
+    }
+
     /// 将本地文件推送到设备。
     ///
     /// # 参数
@@ -838,6 +848,28 @@ impl HmDriver {
         block_on(
             self.inner
                 .wait_for_ui_with_interval(timeout, interval, predicate),
+        )?
+    }
+
+    /// 在超时时间内等待页面级条件满足，并返回完整 UI 树。
+    pub fn wait_for_ui_tree(
+        &self,
+        timeout: Duration,
+        predicate: impl Fn(&UiNode) -> bool,
+    ) -> Result<UiNode> {
+        block_on(self.inner.wait_for_ui_tree(timeout, predicate))?
+    }
+
+    /// 使用指定轮询间隔等待页面级条件满足，并返回完整 UI 树。
+    pub fn wait_for_ui_tree_with_interval(
+        &self,
+        timeout: Duration,
+        interval: Duration,
+        predicate: impl Fn(&UiNode) -> bool,
+    ) -> Result<UiNode> {
+        block_on(
+            self.inner
+                .wait_for_ui_tree_with_interval(timeout, interval, predicate),
         )?
     }
 

@@ -163,6 +163,39 @@ impl HmDriver {
         }
     }
 
+    /// 在超时时间内轮询完整 UI 树，直到 `predicate` 对根节点返回 `true`。
+    ///
+    /// 与 [`wait_for_ui`](Self::wait_for_ui) 不同，此方法始终返回完整根树，适合
+    /// 判断列表数量、兄弟节点关系等页面级状态。
+    pub async fn wait_for_ui_tree(
+        &self,
+        timeout: Duration,
+        predicate: impl Fn(&UiNode) -> bool,
+    ) -> Result<UiNode> {
+        self.wait_for_ui_tree_with_interval(timeout, DEFAULT_POLL_INTERVAL, predicate)
+            .await
+    }
+
+    /// 使用指定轮询间隔等待满足页面级条件的完整 UI 树。
+    pub async fn wait_for_ui_tree_with_interval(
+        &self,
+        timeout: Duration,
+        interval: Duration,
+        predicate: impl Fn(&UiNode) -> bool,
+    ) -> Result<UiNode> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if Instant::now() >= deadline {
+                return Err(DriverError::ElementNotFound);
+            }
+            let tree = self.ui_tree().await?;
+            if predicate(&tree) {
+                return Ok(tree);
+            }
+            sleep_until_next_poll(deadline, interval).await;
+        }
+    }
+
     /// 在总超时时间内轮询任意异步条件。
     pub async fn wait_until<F, Fut>(&self, timeout: Duration, condition: F) -> Result<bool>
     where
@@ -232,13 +265,8 @@ impl HmDriver {
         bundle: &crate::AppIdentifier,
         timeout: Duration,
     ) -> Result<bool> {
-        self.wait_until(timeout, || async {
-            Ok(self
-                .current_app()
-                .await?
-                .is_some_and(|(current, _)| current == *bundle))
-        })
-        .await
+        self.wait_until(timeout, || async { self.is_app_foreground(bundle).await })
+            .await
     }
 
     /// 通过 XPath 表达式查找第一个匹配的 UI 元素，未找到返回 `Err(XPathNotFound)`。

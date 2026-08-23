@@ -121,31 +121,56 @@ impl HmDriver {
             .or_else(|| find_string_key(&value, "mainAbility")))
     }
 
-    /// 获取当前前台应用。
-    pub async fn current_app(&self) -> Result<Option<(AppIdentifier, String)>> {
-        trace!(target: "hm_driver_rs::app", "获取当前前台应用");
+    /// 获取所有前台任务的应用和 Ability。
+    ///
+    /// 分屏、自由窗口等场景可能同时存在多个前台任务；同一应用的多个任务也会
+    /// 分别保留在返回结果中。
+    pub async fn foreground_apps(&self) -> Result<Vec<(AppIdentifier, String)>> {
+        trace!(target: "hm_driver_rs::app", "获取前台应用列表");
         let output = self.inner.hdc.shell("aa dump -l").await?;
-        let bundle_re = Regex::new(r"bundle name \[([A-Za-z0-9_.]+)\]")
-            .map_err(|error| DriverError::Protocol(error.to_string()))?;
-        let ability_re = Regex::new(r"main name \[([A-Za-z0-9_.]+)\]")
-            .map_err(|error| DriverError::Protocol(error.to_string()))?;
-        for block in output.stdout.split("Mission ID #") {
-            if !block.contains("state #FOREGROUND") {
-                continue;
-            }
-            let bundle = bundle_re.captures(block).and_then(|capture| capture.get(1));
-            let ability = ability_re
-                .captures(block)
-                .and_then(|capture| capture.get(1));
-            if let (Some(bundle), Some(ability)) = (bundle, ability) {
-                return Ok(Some((
-                    AppIdentifier::new(bundle.as_str())?,
-                    ability.as_str().to_owned(),
-                )));
-            }
-        }
-        Ok(None)
+        parse_foreground_apps(&output.stdout)
     }
+
+    /// 判断指定应用是否处于任一前台任务中。
+    pub async fn is_app_foreground(&self, bundle: &AppIdentifier) -> Result<bool> {
+        Ok(self
+            .foreground_apps()
+            .await?
+            .into_iter()
+            .any(|(current, _)| current == *bundle))
+    }
+
+    /// 获取第一个前台任务的应用。
+    ///
+    /// 若存在分屏或自由窗口，优先使用 [`foreground_apps`](Self::foreground_apps)
+    /// 或 [`is_app_foreground`](Self::is_app_foreground) 处理多前台任务场景。
+    pub async fn current_app(&self) -> Result<Option<(AppIdentifier, String)>> {
+        Ok(self.foreground_apps().await?.into_iter().next())
+    }
+}
+
+fn parse_foreground_apps(output: &str) -> Result<Vec<(AppIdentifier, String)>> {
+    let bundle_re = Regex::new(r"bundle name \[([A-Za-z0-9_.]+)\]")
+        .map_err(|error| DriverError::Protocol(error.to_string()))?;
+    let ability_re = Regex::new(r"main name \[([A-Za-z0-9_.]+)\]")
+        .map_err(|error| DriverError::Protocol(error.to_string()))?;
+    let mut apps = Vec::new();
+    for block in output.split("Mission ID #") {
+        if !block.contains("state #FOREGROUND") {
+            continue;
+        }
+        let bundle = bundle_re.captures(block).and_then(|capture| capture.get(1));
+        let ability = ability_re
+            .captures(block)
+            .and_then(|capture| capture.get(1));
+        if let (Some(bundle), Some(ability)) = (bundle, ability) {
+            apps.push((
+                AppIdentifier::new(bundle.as_str())?,
+                ability.as_str().to_owned(),
+            ));
+        }
+    }
+    Ok(apps)
 }
 
 /// 单引号包裹 shell 参数，并对参数内的单引号做转义。
@@ -263,5 +288,20 @@ fn find_string_key(value: &Value, key: &str) -> Option<String> {
         }
         Value::Array(values) => values.iter().find_map(|value| find_string_key(value, key)),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 前台任务会保留同屏的多个应用() {
+        let output = "Mission ID #1\n  bundle name [com.example.left]\n  main name [EntryAbility]\n  state #FOREGROUND\nMission ID #2\n  bundle name [com.example.right]\n  main name [MainAbility]\n  state #FOREGROUND\nMission ID #3\n  bundle name [com.example.background]\n  main name [MainAbility]\n  state #BACKGROUND\n";
+        let apps = parse_foreground_apps(output).unwrap();
+        assert_eq!(apps.len(), 2);
+        assert_eq!(apps[0].0.as_str(), "com.example.left");
+        assert_eq!(apps[0].1, "EntryAbility");
+        assert_eq!(apps[1].0.as_str(), "com.example.right");
     }
 }
