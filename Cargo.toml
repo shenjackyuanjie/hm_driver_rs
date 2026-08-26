@@ -1,9 +1,9 @@
 [package]
 name = "hm_driver_rs"
-version = "0.1.2"
+version = "1.0.0"
 edition = "2024"
 rust-version = "1.86"
-publish = false
+publish = true
 description = "基于 HDC 和 UITest 的原生 Rust HarmonyOS UI 自动化驱动"
 authors = ["shenjackyuanjie"]
 repository = "https://github.com/shenjackyuanjie/hm_driver_rs"

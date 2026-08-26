@@ -3,7 +3,7 @@
 基于 HDC、官方 HarmonyOS UITest Agent 和 Hypium JSON RPC 的原生 Rust UI
 自动化驱动。项目以库的形式提供异步 API，并在默认 feature 下提供可选的阻塞门面。
 
-> 当前 crate 版本为 `0.1.1`，`publish = false`。本 crate 以 Apache-2.0 许可发布，
+> 当前 crate 版本为 `1.0.0`，本 crate 以 Apache-2.0 许可发布，
 > 仓库内嵌的官方 UITest Agent 来源详见[许可注意事项](#许可注意事项)。
 
 ## 项目定位
@@ -38,7 +38,16 @@ hdc list targets -v
 ```
 
 ## 接入项目
-仓库当前尚未发布到 crates.io（`publish = false`），因此应通过 Git 路径依赖接入：
+推荐从 crates.io 接入：
+
+```toml
+[dependencies]
+hm_driver_rs = "1.0.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+serde_json = "1"
+```
+
+也可以使用 Git 路径依赖：
 
 ```toml
 [dependencies]
@@ -463,7 +472,7 @@ Cargo package metadata 当前声明为：
 
 ```toml
 license = "Apache-2.0"
-publish = false
+publish = true
 ```
 
 第三方软件的具体记录见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。其中，
