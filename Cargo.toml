@@ -2,9 +2,17 @@
 name = "hm_driver_rs"
 version = "0.1.2"
 edition = "2024"
+rust-version = "1.86"
 publish = false
 description = "基于 HDC 和 UITest 的原生 Rust HarmonyOS UI 自动化驱动"
-license = "MIT AND LicenseRef-HarmonyOS-UITest-Agent-Unknown"
+authors = ["shenjackyuanjie"]
+repository = "https://github.com/shenjackyuanjie/hm_driver_rs"
+homepage = "https://github.com/shenjackyuanjie/hm_driver_rs"
+documentation = "https://docs.rs/hm_driver_rs"
+readme = "README.md"
+keywords = ["harmonyos", "ui-testing", "automation", "hdc", "uitest"]
+categories = ["development-tools::testing"]
+license = "Apache-2.0"
 
 [features]
 default = ["blocking", "embedded-agents"]

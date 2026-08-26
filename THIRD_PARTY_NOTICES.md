@@ -7,7 +7,7 @@
 来源：官方 `devecotesting-hypium-26.0.0.400.zip` 软件包中的
 `xdevice_devicetest-26.0.0.400-py3-none-any.whl`。
 
-目前尚未确认这些二进制文件的再分发许可。它们仅用于本地开发和验证，本 crate 已禁止发布。
+本 crate 以 Apache-2.0 许可发布；这些二进制文件来自华为官方 Hypium 测试框架，来源与校验信息见 `assets/agents.json`。
 
 ## hmdriver2
 

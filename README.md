@@ -3,8 +3,8 @@
 基于 HDC、官方 HarmonyOS UITest Agent 和 Hypium JSON RPC 的原生 Rust UI
 自动化驱动。项目以库的形式提供异步 API，并在默认 feature 下提供可选的阻塞门面。
 
-> 当前 crate 版本为 `0.1.0`，`publish = false`。仓库内包含的官方 UITest Agent
-> 二进制再分发许可尚未确认，因此目前仅适合本地开发和验证。详见[许可注意事项](#许可注意事项)。
+> 当前 crate 版本为 `0.1.1`，`publish = false`。本 crate 以 Apache-2.0 许可发布，
+> 仓库内嵌的官方 UITest Agent 来源详见[许可注意事项](#许可注意事项)。
 
 ## 项目定位
 
@@ -38,7 +38,7 @@ hdc list targets -v
 ```
 
 ## 接入项目
-仓库当前禁止发布到 crates.io，因此应通过 Git 路径依赖接入：
+仓库当前尚未发布到 crates.io（`publish = false`），因此应通过 Git 路径依赖接入：
 
 ```toml
 [dependencies]
@@ -450,8 +450,8 @@ HM_DRIVER_SMOKE=1 HM_DRIVER_DEVICE=<设备序列号> \
 
 ## 许可注意事项
 
-官方 UITest Agent 的再分发许可尚未确认，因此本 crate 设置了 `publish = false`，完成
-许可审查前不得发布。详细来源见 [`assets/README.md`](assets/README.md) 和
+本 crate 以 Apache-2.0 许可发布。内嵌的官方 UITest Agent 来自华为 Hypium 测试
+框架，详细来源见 [`assets/README.md`](assets/README.md) 和
 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 
 `assets/agents/*.so` 逐字节提取自官方
@@ -462,10 +462,10 @@ HM_DRIVER_SMOKE=1 HM_DRIVER_DEVICE=<设备序列号> \
 Cargo package metadata 当前声明为：
 
 ```toml
-license = "MIT AND LicenseRef-HarmonyOS-UITest-Agent-Unknown"
+license = "Apache-2.0"
 publish = false
 ```
 
 第三方软件的具体记录见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。其中，
-`hmdriver2` 1.4.4 为 MIT 许可，仅用于 API/线协议参考；官方 UITest Agent 二进制目前
-仅用于本地开发和验证。
+`hmdriver2` 1.4.4 为 MIT 许可，仅用于 API/线协议参考；官方 UITest Agent 二进制来自
+华为 Hypium 测试框架，本 crate 按 Apache-2.0 发布。
