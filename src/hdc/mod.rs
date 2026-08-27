@@ -175,7 +175,10 @@ const MAX_ERROR_OUTPUT_CHARS: usize = 4_096;
 fn contains_failure_marker(value: &str) -> bool {
     value.lines().any(|line| {
         let line = line.trim_start().to_ascii_lowercase();
-        line.starts_with("error:") || line.starts_with("[fail]")
+        line.starts_with("error:")
+            || line.starts_with("[fail]")
+            || line.contains("msg:error:")
+            || line.contains("failed to install")
     })
 }
 
@@ -205,10 +208,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn failure_markers_only_match_line_prefixes() {
+    fn failure_markers_match_prefixes_and_embedded_errors() {
         assert!(contains_failure_marker("Error: device offline"));
         assert!(contains_failure_marker("notice\n  [Fail] command"));
         assert!(!contains_failure_marker("payload contains error: as data"));
+        assert!(contains_failure_marker(
+            "[Info]App install path:x.app msg:error: failed to install bundle. code:9568448 error: verify app signature failed."
+        ));
     }
 
     #[test]
