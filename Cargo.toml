@@ -1,6 +1,6 @@
 [package]
 name = "hm_driver_rs"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 rust-version = "1.86"
 publish = true
