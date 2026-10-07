@@ -19,8 +19,8 @@ impl AgentCatalog {
     /// 同时验证 source_package、source_wheel 以及 Agent 数量是否与预期一致。
     pub fn load() -> Result<Self> {
         let catalog: Self = serde_json::from_str(include_str!("../assets/agents.json"))?;
-        if catalog.source_package != "devecotesting-hypium-26.0.0.400.zip"
-            || catalog.source_wheel != "xdevice_devicetest-26.0.0.400-py3-none-any.whl"
+        if catalog.source_package != "devecotesting-hypium-26.0.0.500.zip"
+            || catalog.source_wheel != "xdevice_devicetest-26.0.0.500-py3-none-any.whl"
         {
             return Err(DriverError::InvalidAgentCatalog(
                 "官方包或 wheel 来源字段不匹配".into(),
@@ -59,11 +59,11 @@ mod tests {
         let catalog = AgentCatalog::load().unwrap();
         assert_eq!(
             catalog.source_package,
-            "devecotesting-hypium-26.0.0.400.zip"
+            "devecotesting-hypium-26.0.0.500.zip"
         );
         assert_eq!(
             catalog.source_wheel,
-            "xdevice_devicetest-26.0.0.400-py3-none-any.whl"
+            "xdevice_devicetest-26.0.0.500-py3-none-any.whl"
         );
         let pinned = [
             (

@@ -3,7 +3,7 @@
 基于 HDC、官方 HarmonyOS UITest Agent 和 Hypium JSON RPC 的原生 Rust UI
 自动化驱动。项目以库的形式提供异步 API，并在默认 feature 下提供可选的阻塞门面。
 
-> 当前 crate 版本为 `1.0.0`，本 crate 以 Apache-2.0 许可发布，
+> 当前 crate 版本为 `1.0.1`，本 crate 以 Apache-2.0 许可发布，
 > 仓库内嵌的官方 UITest Agent 来源详见[许可注意事项](#许可注意事项)。
 
 ## 项目定位
@@ -42,7 +42,7 @@ hdc list targets -v
 
 ```toml
 [dependencies]
-hm_driver_rs = "1.0.0"
+hm_driver_rs = "1.0.1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 serde_json = "1"
 ```
@@ -168,6 +168,9 @@ Builder 还可通过 `DriverConfig` 调整 RPC 超时（默认 20 秒）、RPC �
 仓库随附五个 Agent。来源包、wheel 内原始路径、文件大小和 SHA-256 固定记录在
 [`assets/agents.json`](assets/agents.json)，连接时会严格校验。当前解析规则如下：
 
+当前来源基线为 Hypium `26.0.0.500`。本地包复核确认其五个 Agent 与此前的
+`26.0.0.400` 完全一致，因此无需替换二进制，版本分流与 transport 保持不变。
+
 | 设备架构 | Agent | UITest 版本条件 | HDC transport | 验证状态 |
 | --- | --- | --- | --- | --- |
 | `arm64` | `v1.1.3` | `<= 5.1.1.2` | TCP `8012` | 仅官方参考 |
@@ -248,6 +251,62 @@ async fn gestures(driver: &hm_driver_rs::HmDriver) -> Result<()> {
     driver.perform_gesture(&Gesture::new(path)).await
 }
 ```
+
+### 系统辅助能力（Hypium 26.0.0.500）
+
+以下接口均提供异步和 `blocking` 门面；Rust 实现只调用设备端工具，不加载官方
+Python 代码，也不新增 Python 依赖：
+
+| 能力 | 接口 | 官方标注的设备要求 |
+| --- | --- | --- |
+| 深浅色模式 | `set_view_mode(ViewMode::Dark / Light)` | `testhelper >= 1.0.0` |
+| 系统时间 | `set_system_time()`、`system_time()` | `testhelper`，系统版本 >= 7.0.0 |
+| IANA 时区 | `set_timezone()`、`timezone()` | `testhelper`，系统版本 >= 7.0.0 |
+| 文本剪贴板 | `write_clipboard()`、`read_clipboard()`、`clear_clipboard()` | `testhelper`，系统版本 >= 7.0.0 |
+| 字体管理 | `font_name()`、`install_font()`、`uninstall_font()` | `testhelper >= 1.0.0` |
+| 网络模拟 | `enable_network_simulation()`、`disable_network_simulation()`、`network_scenarios()`，以及场景启停/删除接口 | `netcopilot`，API Level >= 20、系统版本 >= 6.0.0 |
+
+工具不存在时返回 `DriverError::Unsupported`；网络模拟也会拒绝已知低于 20 的 API
+Level，未知 API Level 时按工具能力探测。其余系统/工具版本要求是官方参考条件，
+驱动不按版本字符串提前判定子命令可用性。命令执行失败继续返回 HDC 错误，无法识别的
+回显返回 `DriverError::Protocol`，不会默认为成功。新增系统能力目前通过模拟 HDC
+调用链验证，**尚未进行真机验证**，不代表所有设备均已支持。
+
+- 时间使用有效的 `YYYY-MM-DD HH:MM:SS` 字符串，时区使用如 `Asia/Shanghai` 的
+  IANA 标识；时区有效性最终由设备判断。
+- 剪贴板允许多行文本和空字符串，拒绝 NUL；读取时保留内容空格与内部换行，只移除
+  回显前缀和一组末尾行结束符。无法识别的输出返回错误，而不是伪装为空剪贴板。
+- 字体文件推送到唯一命名的设备端临时路径，完成、错误或取消时尽力清理；已安装同一
+  字体视为成功。卸载按字体名称调用，不是传入本地路径。
+- `BuiltinNetworkScenario` 提供八个内置场景；`NetworkScenario::new()` 校验自定义
+  场景名称与丢包率（`0.0..=1.0`），带宽和延迟使用非负整数，带宽单位沿用设备工具，
+  延迟为毫秒。调用时会重新校验公开字段，拒绝 NaN、无穷大等非法参数。
+- `start_custom_network_scenario()` 返回新场景 ID；启动失败时尽力删除刚创建的场景。
+  通过 ID 显式 `stop_network_scenario()`、`delete_network_scenario()` 管理生命周期；
+  停止不会自动删除，`close()` 也不还原系统设置或停止网络模拟。切换场景前应先停止
+  原场景，网络配置操作应串行执行，不与其他调用方并发修改设备场景列表。
+
+```rust,no_run
+use hm_driver_rs::{HmDriver, NetworkScenario, Result, ViewMode};
+
+async fn system_helpers(driver: &HmDriver) -> Result<()> {
+    driver.set_view_mode(ViewMode::Dark).await?;
+    driver.write_clipboard("Hello, HarmonyOS!").await?;
+    let _text = driver.read_clipboard().await?;
+    let _time = driver.system_time().await?;
+    let _timezone = driver.timezone().await?;
+
+    let scenario = NetworkScenario::new("弱网", 100_000, 500_000, 200, 200, 0.05, 0.01)?;
+    let id = driver.start_custom_network_scenario(&scenario).await?;
+    // 在此执行测试；实际应用应在测试失败时也安排这些清理操作。
+    driver.stop_network_scenario(id).await?;
+    driver.delete_network_scenario(id).await?;
+    driver.disable_network_simulation().await
+}
+```
+
+这些操作会改变系统设置、剪贴板、已安装字体或网络状态，应只在明确允许修改的测试
+设备上调用，并由调用方恢复原状态。
 
 ### 应用管理
 
@@ -413,6 +472,10 @@ cargo test --all-features
 cargo check --no-default-features
 ```
 
+系统辅助能力的单元测试以模拟 HDC 验证命令参数、shell 引号、工具缺失、异常回显、
+低 API Level、自定义网络场景启动失败后的清理，以及字体临时文件清理；不修改真机。
+可单独执行 `cargo test --all-features driver::system::tests`。
+
 仓库还提供一个默认忽略的真机冒烟测试。它固定验证 ARM64、UITest Agent `v1.2.3`，
 会读取设备状态和 Ability，执行截图、按键、滑动、多指轨迹、UI 树、XPath 和 Selector
 操作；测试设备需要安装 `com.chinadaily.har`，并包含 `EntryAbility`。
@@ -437,7 +500,8 @@ HM_DRIVER_SMOKE=1 HM_DRIVER_DEVICE=<设备序列号> \
 ## 当前范围
 
 当前版本包含设备与应用基础操作、文件传输、截图、UI 树、Selector、控件交互、XPath
-1.0、Toast/UI 事件、窗口管理、鼠标/触控笔/触控板/表冠输入和最多十指的自定义轨迹。
+1.0、Toast/UI 事件、窗口管理、鼠标/触控笔/触控板/表冠输入、最多十指的自定义轨迹，
+以及剪贴板、深浅色模式、时间/时区、字体和网络模拟系统辅助能力。
 
 暂不包含：
 
@@ -464,9 +528,12 @@ HM_DRIVER_SMOKE=1 HM_DRIVER_DEVICE=<设备序列号> \
 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 
 `assets/agents/*.so` 逐字节提取自官方
-`devecotesting-hypium-26.0.0.400.zip` 软件包内的
-`xdevice_devicetest-26.0.0.400-py3-none-any.whl`，其 wheel 内原始目录为
+`devecotesting-hypium-26.0.0.500.zip` 软件包内的
+`xdevice_devicetest-26.0.0.500-py3-none-any.whl`，其 wheel 内原始目录为
 `devicetest/res/prototype/native/`。
+
+五个文件与此前 `26.0.0.400` 来源一致，本次只更新来源钉住信息。
+官方下载包和官方 Python 源码仅用于本地分析，不纳入 Git 或 crate 发布包。
 
 Cargo package metadata 当前声明为：
 

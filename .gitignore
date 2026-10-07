@@ -4,3 +4,7 @@
 # 编辑器和临时备份文件
 *.rs.bk
 *.tmp
+
+# 官方下载包和分析材料仅供本地对照，不纳入仓库
+/devecotesting-hypium-*.zip
+/.local-analysis/

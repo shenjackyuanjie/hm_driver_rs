@@ -108,7 +108,7 @@ impl HmDriver {
 
     /// 等待文本内容匹配的节点出现（支持精确、包含、前后缀和正则表达式）。
     ///
-    /// 内部使用 [`wait_for_ui`] 轮询 UI 树，超时返回 `Err(ElementNotFound)`。
+    /// 内部使用 [`wait_for_ui`](Self::wait_for_ui) 轮询 UI 树，超时返回 `Err(ElementNotFound)`。
     pub async fn wait_for_text(
         &self,
         text: &str,

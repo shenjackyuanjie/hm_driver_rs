@@ -29,10 +29,11 @@ pub use keycode::KeyCode;
 pub use rpc::ApiDialect;
 pub use selector::{Element, ElementInfo, MatchPattern, Selector};
 pub use types::{
-    AbilityInfo, AppIdentifier, Bounds, DeviceDescriptor, DeviceInfo, DeviceSelector, DeviceSerial,
-    DeviceStatus, DisplayRotation, DisplaySize, ForwardEndpoint, ForwardEntry, MouseButton,
-    NormalizedPoint, OpenUrlMode, Point, Position, ResizeDirection, ScreenState, ScreenshotMethod,
-    SwipeArea, SwipeDirection, UiEvent, UiEventType, WindowFilter, WindowMode, validate_ability,
+    AbilityInfo, AppIdentifier, Bounds, BuiltinNetworkScenario, DeviceDescriptor, DeviceInfo,
+    DeviceSelector, DeviceSerial, DeviceStatus, DisplayRotation, DisplaySize, ForwardEndpoint,
+    ForwardEntry, MouseButton, NetworkScenario, NetworkScenarioInfo, NormalizedPoint, OpenUrlMode,
+    Point, Position, ResizeDirection, ScreenState, ScreenshotMethod, SwipeArea, SwipeDirection,
+    UiEvent, UiEventType, ViewMode, WindowFilter, WindowMode, validate_ability,
 };
 pub use ui::UiNode;
 pub use window::UiWindow;

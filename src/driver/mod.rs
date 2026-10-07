@@ -7,6 +7,7 @@
 //! - [`app`]：应用安装、启停与信息查询。
 //! - [`files`]：文件推拉、原始 shell 与截图。
 //! - [`query`]：UI 树、选择器查找与 XPath。
+//! - [`system`]：剪贴板、显示模式、时间/时区、字体与网络模拟。
 
 mod app;
 mod device;
@@ -15,6 +16,7 @@ mod files;
 mod input;
 mod query;
 mod session;
+mod system;
 mod window;
 
 #[cfg(test)]
@@ -393,7 +395,7 @@ impl HmDriver {
 
     /// 恢复已断开的会话（重新推送 Agent、建立端口转发、创建远端 Driver）。
     ///
-    /// 调用后会话代际递增，所有之前获取的 [`Element`] 和 [`XPathElement`] 将失效。
+    /// 调用后会话代际递增，所有之前获取的 [`Element`](crate::Element) 和 [`XPathElement`](crate::XPathElement) 将失效。
     pub async fn recover(&self) -> Result<()> {
         warn!(target: "hm_driver_rs::driver", "开始恢复会话");
         let mut state = self.inner.state.lock().await;

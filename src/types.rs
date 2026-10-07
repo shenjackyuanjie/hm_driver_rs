@@ -338,6 +338,126 @@ pub enum ScreenState {
     Unknown(String),
 }
 
+/// 系统界面显示模式。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ViewMode {
+    /// 深色模式。
+    Dark,
+    /// 浅色模式。
+    Light,
+}
+
+impl ViewMode {
+    /// 返回设备命令使用的模式值。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Dark => "dark",
+            Self::Light => "light",
+        }
+    }
+}
+
+/// 官方内置网络模拟场景。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum BuiltinNetworkScenario {
+    /// 进出电梯。
+    Elevator = 1,
+    /// 离家断开 WLAN。
+    HomeWifiDisconnect = 2,
+    /// 到家连接 WLAN。
+    HomeWifiConnect = 3,
+    /// 人员拥挤的饭堂。
+    CrowdedCafeteria = 4,
+    /// 信号弱的地库。
+    UndergroundGarage = 5,
+    /// 乘坐地铁。
+    Subway = 6,
+    /// 乘坐高铁并发生多 SIM 切换。
+    HighSpeedRail = 7,
+    /// 高速公路自驾。
+    HighwayDriving = 8,
+}
+
+impl BuiltinNetworkScenario {
+    /// 返回设备端场景 ID。
+    pub const fn id(self) -> u32 {
+        self as u32
+    }
+}
+
+/// 自定义网络模拟场景参数。
+#[derive(Clone, Debug, PartialEq)]
+pub struct NetworkScenario {
+    /// 场景名称。
+    pub name: String,
+    /// 上行带宽，单位由设备端 `netcopilot` 定义。
+    pub uplink_bandwidth: u64,
+    /// 下行带宽，单位由设备端 `netcopilot` 定义。
+    pub downlink_bandwidth: u64,
+    /// 上行延迟，单位毫秒。
+    pub uplink_latency: u64,
+    /// 下行延迟，单位毫秒。
+    pub downlink_latency: u64,
+    /// 上行丢包率，范围 `0.0..=1.0`。
+    pub uplink_drop_rate: f64,
+    /// 下行丢包率，范围 `0.0..=1.0`。
+    pub downlink_drop_rate: f64,
+}
+
+impl NetworkScenario {
+    /// 创建并校验自定义网络模拟场景。
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        name: impl Into<String>,
+        uplink_bandwidth: u64,
+        downlink_bandwidth: u64,
+        uplink_latency: u64,
+        downlink_latency: u64,
+        uplink_drop_rate: f64,
+        downlink_drop_rate: f64,
+    ) -> Result<Self> {
+        let scenario = Self {
+            name: name.into(),
+            uplink_bandwidth,
+            downlink_bandwidth,
+            uplink_latency,
+            downlink_latency,
+            uplink_drop_rate,
+            downlink_drop_rate,
+        };
+        scenario.validate()?;
+        Ok(scenario)
+    }
+
+    pub(crate) fn validate(&self) -> Result<()> {
+        if self.name.trim().is_empty() || self.name.chars().any(char::is_control) {
+            return Err(DriverError::InvalidArgument(
+                "网络模拟场景名称不能为空或包含控制字符".into(),
+            ));
+        }
+        if !self.uplink_drop_rate.is_finite()
+            || !self.downlink_drop_rate.is_finite()
+            || !(0.0..=1.0).contains(&self.uplink_drop_rate)
+            || !(0.0..=1.0).contains(&self.downlink_drop_rate)
+        {
+            return Err(DriverError::InvalidArgument(
+                "网络模拟丢包率必须位于 0.0 到 1.0".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// 设备端网络模拟场景摘要。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NetworkScenarioInfo {
+    /// 场景 ID。
+    pub id: u32,
+    /// 场景名称。
+    pub name: String,
+}
+
 /// 打开 URL 时使用的目标。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OpenUrlMode {
@@ -677,6 +797,34 @@ fn is_valid_identifier(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validates_network_scenario_parameters_and_builtin_ids() {
+        assert_eq!(ViewMode::Dark.as_str(), "dark");
+        assert_eq!(ViewMode::Light.as_str(), "light");
+        let builtins = [
+            BuiltinNetworkScenario::Elevator,
+            BuiltinNetworkScenario::HomeWifiDisconnect,
+            BuiltinNetworkScenario::HomeWifiConnect,
+            BuiltinNetworkScenario::CrowdedCafeteria,
+            BuiltinNetworkScenario::UndergroundGarage,
+            BuiltinNetworkScenario::Subway,
+            BuiltinNetworkScenario::HighSpeedRail,
+            BuiltinNetworkScenario::HighwayDriving,
+        ];
+        assert_eq!(
+            builtins.map(BuiltinNetworkScenario::id),
+            [1, 2, 3, 4, 5, 6, 7, 8]
+        );
+        assert!(NetworkScenario::new("边界", 0, u64::MAX, 0, u64::MAX, 0.0, 1.0).is_ok());
+        for name in ["", "   ", "line\n", "name\0", "tab\t"] {
+            assert!(NetworkScenario::new(name, 0, 0, 0, 0, 0.0, 0.0).is_err());
+        }
+        for rate in [-0.1, 1.1, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(NetworkScenario::new("test", 0, 0, 0, 0, rate, 0.0).is_err());
+            assert!(NetworkScenario::new("test", 0, 0, 0, 0, 0.0, rate).is_err());
+        }
+    }
 
     #[test]
     fn serial_format_is_always_redacted() {

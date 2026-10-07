@@ -12,7 +12,7 @@ pub struct XPathElement {
 impl XPathElement {
     /// 判断 XPath 表达式匹配的元素是否存在。
     ///
-    /// 与 [`HmDriver::xpath_exists`] 不同，此方法基于已缓存的结果判断，
+    /// 与 [`HmDriver::xpath_exists`](crate::blocking::HmDriver::xpath_exists) 不同，此方法基于已缓存的结果判断，
     /// 无需再次发起远程调用。
     pub fn exists(&self) -> bool {
         self.inner.exists()

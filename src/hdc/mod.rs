@@ -87,9 +87,28 @@ struct HdcRunnerInner {
     server: Option<(String, u16)>,
     serial: Option<DeviceSerial>,
     config: HdcConfig,
+    #[cfg(test)]
+    handler: Option<Arc<TestHandler>>,
 }
 
+#[cfg(test)]
+type TestHandler = dyn Fn(&[std::ffi::OsString]) -> Result<CommandOutput> + Send + Sync;
+
 impl HdcRunner {
+    #[cfg(test)]
+    pub(crate) fn with_test_handler(
+        handler: impl Fn(&[std::ffi::OsString]) -> Result<CommandOutput> + Send + Sync + 'static,
+    ) -> Self {
+        let mut runner = Self::new(
+            HdcConfig::default()
+                .with_path(std::env::current_exe().expect("测试程序路径"))
+                .with_server("127.0.0.1", 8710),
+        )
+        .expect("测试 HDC runner");
+        Arc::get_mut(&mut runner.inner).unwrap().handler = Some(Arc::new(handler));
+        runner
+    }
+
     pub fn new(config: HdcConfig) -> Result<Self> {
         let executable = parse::resolve_hdc_path(config.path.as_deref())?;
         let server = match config.server.clone() {
@@ -102,6 +121,8 @@ impl HdcRunner {
                 server,
                 serial: None,
                 config,
+                #[cfg(test)]
+                handler: None,
             }),
         })
     }
@@ -113,6 +134,8 @@ impl HdcRunner {
                 server: self.inner.server.clone(),
                 serial: Some(serial),
                 config: self.inner.config.clone(),
+                #[cfg(test)]
+                handler: self.inner.handler.clone(),
             }),
         }
     }
@@ -126,6 +149,28 @@ impl HdcRunner {
         I: IntoIterator<Item = S>,
         S: AsRef<std::ffi::OsStr>,
     {
+        self.run_with_stdout_prefix(arguments, duration, None).await
+    }
+
+    async fn run_with_stdout_prefix<I, S>(
+        &self,
+        arguments: I,
+        duration: Duration,
+        data_prefix: Option<&str>,
+    ) -> Result<CommandOutput>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<std::ffi::OsStr>,
+    {
+        #[cfg(test)]
+        let arguments: Vec<std::ffi::OsString> = arguments
+            .into_iter()
+            .map(|argument| argument.as_ref().to_owned())
+            .collect();
+        #[cfg(test)]
+        if let Some(handler) = &self.inner.handler {
+            return handler(&arguments);
+        }
         let mut command = Command::new(&self.inner.executable);
         command.kill_on_drop(true);
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -148,7 +193,8 @@ impl HdcRunner {
         };
         let stdout = self.redact(String::from_utf8_lossy(&result.stdout).into_owned());
         let stderr = self.redact(String::from_utf8_lossy(&result.stderr).into_owned());
-        let failed_marker = contains_failure_marker(&stdout) || contains_failure_marker(&stderr);
+        let failed_marker = contains_stdout_failure_marker(&stdout, data_prefix)
+            || contains_failure_marker(&stderr);
         if !result.status.success() || failed_marker {
             return Err(DriverError::HdcCommand {
                 code: result.status.code(),
@@ -171,6 +217,12 @@ impl HdcRunner {
 }
 
 const MAX_ERROR_OUTPUT_CHARS: usize = 4_096;
+
+fn contains_stdout_failure_marker(value: &str, data_prefix: Option<&str>) -> bool {
+    // 有明确数据前缀的回显之后是用户内容，不能将其中的 Error: 等文本当作命令失败。
+    // HDC 非零退出码与 stderr 错误仍由运行器独立检查。
+    !data_prefix.is_some_and(|prefix| value.starts_with(prefix)) && contains_failure_marker(value)
+}
 
 fn contains_failure_marker(value: &str) -> bool {
     value.lines().any(|line| {
@@ -215,6 +267,21 @@ mod tests {
         assert!(contains_failure_marker(
             "[Info]App install path:x.app msg:error: failed to install bundle. code:9568448 error: verify app signature failed."
         ));
+    }
+
+    #[test]
+    fn framed_text_does_not_treat_clipboard_content_as_command_errors() {
+        let output = "Pasteboard text: first line\nError: copied log\n[Fail] copied log\n";
+        assert!(contains_stdout_failure_marker(output, None));
+        assert!(!contains_stdout_failure_marker(
+            output,
+            Some("Pasteboard text:")
+        ));
+        assert!(contains_stdout_failure_marker(
+            "Error: testhelper unavailable",
+            Some("Pasteboard text:")
+        ));
+        assert!(contains_failure_marker("Error: device offline"));
     }
 
     #[test]

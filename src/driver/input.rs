@@ -12,7 +12,7 @@ use tracing::{debug, trace};
 impl HmDriver {
     /// 通过按键码（原始值）发送按键事件。
     ///
-    /// 按键码范围 0–3200；需要类型安全的按键码请使用 [`press_key_code`] 或 [`KeyCode`]。
+    /// 按键码范围 0–3200；需要类型安全的按键码请使用 [`press_key_code`](Self::press_key_code) 或 [`KeyCode`]。
     pub async fn press_key(&self, key_code: u32) -> Result<()> {
         trace!(target: "hm_driver_rs::input", key_code, "按键事件");
         if key_code > 3200 {
@@ -559,12 +559,7 @@ impl HmDriver {
     ///
     /// 该能力依赖设备端 `testhelper`；工具不存在时返回 [`DriverError::Unsupported`]。
     pub async fn hide_keyboard(&self) -> Result<()> {
-        let probe = self.inner.hdc.shell("command -v testhelper").await?;
-        if probe.stdout.trim().is_empty() {
-            return Err(DriverError::Unsupported(
-                "设备未提供 testhelper，无法隐藏软键盘".into(),
-            ));
-        }
+        self.ensure_testhelper("隐藏软键盘").await?;
         match self.inner.hdc.shell("testhelper hide-keyboard").await {
             Ok(output) => validate_hide_keyboard_output(&output.stdout),
             Err(error) if is_no_active_keyboard_error(&error) => Ok(()),

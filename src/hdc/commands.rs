@@ -45,6 +45,20 @@ impl HdcRunner {
         .await
     }
 
+    /// 执行返回带已知前缀文本数据的命令，不扫描有效数据内容中的失败标记。
+    pub(crate) async fn shell_with_stdout_prefix(
+        &self,
+        command: &str,
+        data_prefix: &str,
+    ) -> Result<CommandOutput> {
+        self.run_with_stdout_prefix(
+            ["shell", command],
+            self.inner.config.command_timeout,
+            Some(data_prefix),
+        )
+        .await
+    }
+
     pub async fn shell_timeout(
         &self,
         command: impl AsRef<OsStr>,

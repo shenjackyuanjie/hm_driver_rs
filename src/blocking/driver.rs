@@ -1,10 +1,10 @@
 use super::{Element, UiWindow, XPathElement, block_on};
 use crate::{
-    AbilityInfo, AgentProfile, AgentSource, AppIdentifier, CommandOutput, DeviceDescriptor,
-    DeviceInfo, DeviceSelector, DisplayRotation, DisplaySize, DriverConfig, ForwardEntry, Gesture,
-    HdcConfig, KeyCode, MatchPattern, MouseButton, OpenUrlMode, Point, Position, Result,
-    ScreenState, ScreenshotMethod, Selector, SwipeArea, SwipeDirection, UiEvent, UiEventType,
-    UiNode, WindowFilter,
+    AbilityInfo, AgentProfile, AgentSource, AppIdentifier, BuiltinNetworkScenario, CommandOutput,
+    DeviceDescriptor, DeviceInfo, DeviceSelector, DisplayRotation, DisplaySize, DriverConfig,
+    ForwardEntry, Gesture, HdcConfig, KeyCode, MatchPattern, MouseButton, NetworkScenario,
+    NetworkScenarioInfo, OpenUrlMode, Point, Position, Result, ScreenState, ScreenshotMethod,
+    Selector, SwipeArea, SwipeDirection, UiEvent, UiEventType, UiNode, ViewMode, WindowFilter,
 };
 use serde_json::Value;
 use std::net::IpAddr;
@@ -507,6 +507,101 @@ impl HmDriver {
     /// 清空当前获得焦点的输入框。
     pub fn clear_text_on_current_cursor(&self) -> Result<()> {
         block_on(self.inner.clear_text_on_current_cursor())?
+    }
+
+    /// 设置系统界面为深色或浅色模式。
+    pub fn set_view_mode(&self, mode: ViewMode) -> Result<()> {
+        block_on(self.inner.set_view_mode(mode))?
+    }
+
+    /// 将系统时间设置为 `YYYY-MM-DD HH:MM:SS`。
+    pub fn set_system_time(&self, value: &str) -> Result<()> {
+        block_on(self.inner.set_system_time(value))?
+    }
+
+    /// 读取系统时间，返回 `YYYY-MM-DD HH:MM:SS`。
+    pub fn system_time(&self) -> Result<String> {
+        block_on(self.inner.system_time())?
+    }
+
+    /// 设置 IANA 时区。
+    pub fn set_timezone(&self, timezone: &str) -> Result<()> {
+        block_on(self.inner.set_timezone(timezone))?
+    }
+
+    /// 读取当前 IANA 时区标识。
+    pub fn timezone(&self) -> Result<String> {
+        block_on(self.inner.timezone())?
+    }
+
+    /// 将文本写入系统剪贴板。
+    pub fn write_clipboard(&self, value: &str) -> Result<()> {
+        block_on(self.inner.write_clipboard(value))?
+    }
+
+    /// 读取系统剪贴板文本。
+    pub fn read_clipboard(&self) -> Result<String> {
+        block_on(self.inner.read_clipboard())?
+    }
+
+    /// 清空系统剪贴板。
+    pub fn clear_clipboard(&self) -> Result<()> {
+        block_on(self.inner.clear_clipboard())?
+    }
+
+    /// 读取本地字体文件声明的字体名称。
+    pub fn font_name(&self, local: impl AsRef<Path>) -> Result<String> {
+        block_on(self.inner.font_name(local))?
+    }
+
+    /// 安装本地字体文件。
+    pub fn install_font(&self, local: impl AsRef<Path>) -> Result<()> {
+        block_on(self.inner.install_font(local))?
+    }
+
+    /// 按字体名称卸载字体。
+    pub fn uninstall_font(&self, font_name: &str) -> Result<()> {
+        block_on(self.inner.uninstall_font(font_name))?
+    }
+
+    /// 启用设备端网络模拟工具。
+    pub fn enable_network_simulation(&self) -> Result<()> {
+        block_on(self.inner.enable_network_simulation())?
+    }
+
+    /// 禁用设备端网络模拟工具。
+    pub fn disable_network_simulation(&self) -> Result<()> {
+        block_on(self.inner.disable_network_simulation())?
+    }
+
+    /// 列出设备端可用的网络模拟场景。
+    pub fn network_scenarios(&self) -> Result<Vec<NetworkScenarioInfo>> {
+        block_on(self.inner.network_scenarios())?
+    }
+
+    /// 启动已有网络模拟场景。
+    pub fn start_network_scenario(&self, scenario_id: u32) -> Result<()> {
+        block_on(self.inner.start_network_scenario(scenario_id))?
+    }
+
+    /// 启动官方内置网络模拟场景。
+    pub fn start_builtin_network_scenario(&self, scenario: BuiltinNetworkScenario) -> Result<()> {
+        block_on(self.inner.start_builtin_network_scenario(scenario))?
+    }
+
+    /// 新建并启动自定义网络模拟场景，返回设备分配的场景 ID。
+    pub fn start_custom_network_scenario(&self, scenario: &NetworkScenario) -> Result<u32> {
+        block_on(self.inner.start_custom_network_scenario(scenario))?
+    }
+
+    /// 停止指定网络模拟场景。
+    pub fn stop_network_scenario(&self, scenario_id: u32) -> Result<()> {
+        block_on(self.inner.stop_network_scenario(scenario_id))?
+    }
+
+    /// 删除指定自定义网络模拟场景。
+    pub fn delete_network_scenario(&self, scenario_id: u32) -> Result<()> {
+        block_on(self.inner.delete_network_scenario(scenario_id))?
     }
 
     /// 等待设备进入空闲状态。
