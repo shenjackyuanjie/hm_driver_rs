@@ -62,6 +62,7 @@ async fn main() -> Result<()> {
 
 | 文档 | 内容 |
 | --- | --- |
+| [更新日志](CHANGELOG.md) | 未发布变更、历史版本和升级要求 |
 | [接入与会话指南](docs/usage.md) | 依赖与 features、阻塞 API、设备/HDC 配置、等待、恢复与清理、原始调用及隐私 |
 | [功能与用法](docs/capabilities.md) | 输入手势、系统辅助、应用/文件、Selector、UI 树、XPath、事件和窗口 |
 | [Agent 兼容性与来源](docs/agents.md) | 架构/版本选择、transport、内嵌缓存与外部目录 |
