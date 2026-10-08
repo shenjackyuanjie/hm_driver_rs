@@ -1,4 +1,8 @@
-//! UI 树抓取、选择器查找与 XPath 查询。
+//! UI 树采集、远端 Selector 定位、主机 XPath 与显式等待。
+//!
+//! Selector 返回远端控件句柄，UI 树与 XPath 返回主机快照。
+//! 异步条件/查询等待在 Future 上施加截止时间；UI 树谓词等待在每次采集前检查时间，
+//! 单次采集使用 HDC 超时。匹配顺序、索引与各等待返回值在公开 API 中说明。
 
 use super::{HmDriver, RemoteFileGuard, next_operation_id};
 use crate::selector::{Element, MatchPattern, Selector};
@@ -16,6 +20,9 @@ const DEFAULT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 impl HmDriver {
     /// 获取当前界面的 UI 树（通过 `uitest dumpLayout`）。
+    ///
+    /// 在设备生成临时 JSON 文件并通过 HDC 拉回主机，返回完整根树快照；操作后清理临时文件。
+    /// 采集/传输错误及 JSON 解析错误直接返回。
     pub async fn ui_tree(&self) -> Result<UiNode> {
         debug!(target: "hm_driver_rs::query", "获取 UI 树");
         let directory = tempdir()?;
@@ -36,7 +43,9 @@ impl HmDriver {
         result
     }
 
-    /// 使用选择器查找第一个匹配的 UI 元素。
+    /// 使用选择器查找指定索引的 UI 元素。
+    ///
+    /// 默认索引为 `0`；使用 [`Selector::index`] 选择其他匹配项。未找到返回 `None`。
     pub async fn find(&self, selector: &Selector) -> Result<Option<Element>> {
         trace!(target: "hm_driver_rs::query", ?selector, "查找元素");
         let index = selector.selected_index();
@@ -56,16 +65,22 @@ impl HmDriver {
     }
 
     /// 判断选择器是否有匹配的元素。
+    ///
+    /// 遵循 [`Selector::index`]；查询失败返回错误，而不是 `false`。
     pub async fn exists(&self, selector: &Selector) -> Result<bool> {
         Ok(self.find(selector).await?.is_some())
     }
 
     /// 统计选择器匹配的元素数量。
+    ///
+    /// 统计全部匹配项，与 [`Selector::index`] 无关；无匹配返回 `0`。
     pub async fn count(&self, selector: &Selector) -> Result<usize> {
         Ok(self.find_all(selector).await?.len())
     }
 
-    /// 如果元素存在则点击，返回是否点击成功。
+    /// 找到选择器指定索引的元素后点击，返回 `true`；未找到返回 `false`。
+    ///
+    /// 查找或点击失败返回对应错误。
     pub async fn click_if_exists(&self, selector: &Selector) -> Result<bool> {
         let Some(element) = self.find(selector).await? else {
             return Ok(false);
@@ -75,6 +90,8 @@ impl HmDriver {
     }
 
     /// 查找所有匹配选择器的 UI 元素。
+    ///
+    /// 保留远端返回顺序，忽略 [`Selector::index`]；无匹配返回空列表。
     pub async fn find_all(&self, selector: &Selector) -> Result<Vec<Element>> {
         trace!(target: "hm_driver_rs::query", ?selector, "查找所有元素");
         let generation = self.generation();
@@ -90,6 +107,9 @@ impl HmDriver {
     }
 
     /// 在总超时时间内等待元素出现，超时返回 `Err(ElementNotFound)`。
+    ///
+    /// 默认间隔 100 毫秒，总截止时间约束单次异步查找和轮询休眠。`timeout` 为零立即返回
+    /// [`DriverError::ElementNotFound`]；其他查询错误直接返回。
     pub async fn wait_for(&self, selector: &Selector, timeout: Duration) -> Result<Element> {
         debug!(target: "hm_driver_rs::query", ?selector, ?timeout, "wait_for");
         let deadline = Instant::now() + timeout;
@@ -109,6 +129,9 @@ impl HmDriver {
     /// 等待文本内容匹配的节点出现（支持精确、包含、前后缀和正则表达式）。
     ///
     /// 内部使用 [`wait_for_ui`](Self::wait_for_ui) 轮询 UI 树，超时返回 `Err(ElementNotFound)`。
+    ///
+    /// `text` 是实际匹配字符串或正则，`pattern` 选择匹配模式，其内字符串以 `text` 为准。
+    /// 非法正则返回 [`DriverError::InvalidArgument`]；采集与超时行为同 UI 树等待。
     pub async fn wait_for_text(
         &self,
         text: &str,
@@ -130,9 +153,10 @@ impl HmDriver {
         .await
     }
 
-    /// 在超时时间内轮询 UI 树，直到某个节点满足 `predicate`。
+    /// 轮询 UI 树，返回深度优先遍历中第一个满足 `predicate` 的节点快照。
     ///
-    /// 返回第一个匹配的节点。超时返回 `Err(ElementNotFound)`。
+    /// 默认轮询间隔为 100 毫秒，采集前检查截止时间；详细超时语义见
+    /// [`wait_for_ui_with_interval`](Self::wait_for_ui_with_interval)。
     pub async fn wait_for_ui(
         &self,
         timeout: Duration,
@@ -144,6 +168,11 @@ impl HmDriver {
     }
 
     /// 使用指定的轮询间隔等待 UI 节点出现。
+    ///
+    /// 每次采集前检查 `timeout` 的截止时间，达到时返回 [`DriverError::ElementNotFound`]。
+    /// 单次采集按 HDC 命令/传输超时执行，同步谓词执行至返回，所以一次采集和判断
+    /// 可以越过此截止时间；匹配时返回该节点的独立快照。采集错误直接返回。
+    /// 单次采集纳入总截止时间是 crate 对齐记录中的待补项。
     pub async fn wait_for_ui_with_interval(
         &self,
         timeout: Duration,
@@ -163,10 +192,10 @@ impl HmDriver {
         }
     }
 
-    /// 在超时时间内轮询完整 UI 树，直到 `predicate` 对根节点返回 `true`。
+    /// 轮询完整 UI 树，直到 `predicate` 对根节点返回 `true`。
     ///
-    /// 与 [`wait_for_ui`](Self::wait_for_ui) 不同，此方法始终返回完整根树，适合
-    /// 判断列表数量、兄弟节点关系等页面级状态。
+    /// 返回完整根树，适合判断列表数量和兄弟节点关系；默认轮询间隔为 100 毫秒。
+    /// 超时语义见 [`wait_for_ui_tree_with_interval`](Self::wait_for_ui_tree_with_interval)。
     pub async fn wait_for_ui_tree(
         &self,
         timeout: Duration,
@@ -177,6 +206,10 @@ impl HmDriver {
     }
 
     /// 使用指定轮询间隔等待满足页面级条件的完整 UI 树。
+    ///
+    /// 截止时间在每次采集前检查，单次 HDC 采集和同步谓词执行至返回。
+    /// 达到截止时间返回 [`DriverError::ElementNotFound`]，采集错误直接返回；
+    /// 具体超时范围同 [`wait_for_ui_with_interval`](Self::wait_for_ui_with_interval)。
     pub async fn wait_for_ui_tree_with_interval(
         &self,
         timeout: Duration,
@@ -197,6 +230,9 @@ impl HmDriver {
     }
 
     /// 在总超时时间内轮询任意异步条件。
+    ///
+    /// 默认间隔 100 毫秒；总截止时间约束条件 Future 和轮询休眠。
+    /// 条件为 `true` 时返回 `true`，超时（含零超时）返回 `false`，条件错误直接返回。
     pub async fn wait_until<F, Fut>(&self, timeout: Duration, condition: F) -> Result<bool>
     where
         F: FnMut() -> Fut,
@@ -207,6 +243,9 @@ impl HmDriver {
     }
 
     /// 使用指定轮询间隔等待任意异步条件。
+    ///
+    /// 语义同 [`wait_until`](Self::wait_until)。`interval` 是一次未满足条件后的休眠时长，
+    /// 休眠以剩余截止时间为上限；异步条件应通过让出执行权完成耗时工作。
     pub async fn wait_until_with_interval<F, Fut>(
         &self,
         timeout: Duration,
@@ -232,6 +271,9 @@ impl HmDriver {
     }
 
     /// 等待 XPath 节点出现。
+    ///
+    /// 默认间隔 100 毫秒，总截止时间约束采集/查询及休眠；超时（含零超时）返回
+    /// [`DriverError::XPathNotFound`]，表达式或采集错误直接返回。
     pub async fn wait_for_xpath(
         &self,
         expression: &str,
@@ -252,6 +294,8 @@ impl HmDriver {
     }
 
     /// 等待 XPath 节点消失，超时返回 `false`。
+    ///
+    /// 每次重新采集并查询 UI 树；截止时间和错误语义同 [`wait_until`](Self::wait_until)。
     pub async fn wait_until_xpath_gone(&self, expression: &str, timeout: Duration) -> Result<bool> {
         self.wait_until(timeout, || async {
             Ok(self.xpath_optional(expression).await?.is_none())
@@ -260,6 +304,8 @@ impl HmDriver {
     }
 
     /// 等待指定应用进入前台，超时返回 `false`。
+    ///
+    /// 检查任意前台任务，支持多窗口；截止时间和错误语义同 [`wait_until`](Self::wait_until)。
     pub async fn wait_for_app(
         &self,
         bundle: &crate::AppIdentifier,
@@ -270,6 +316,9 @@ impl HmDriver {
     }
 
     /// 通过 XPath 表达式查找第一个匹配的 UI 元素，未找到返回 `Err(XPathNotFound)`。
+    ///
+    /// 先采集 UI 树，在主机执行 XPath 1.0；表达式须返回节点集合，语法错误或标量结果返回
+    /// [`DriverError::InvalidXPath`]。返回的属性与 bounds 是采集快照。
     pub async fn xpath(&self, expression: &str) -> Result<XPathElement> {
         trace!(target: "hm_driver_rs::query", expression, "XPath 查询");
         self.xpath_optional(expression)
@@ -278,6 +327,8 @@ impl HmDriver {
     }
 
     /// 通过 XPath 表达式查找第一个匹配的 UI 元素，未找到返回 `None`。
+    ///
+    /// 表达式要求及快照语义同 [`xpath`](Self::xpath)，采集和表达式错误仍返回错误。
     pub async fn xpath_optional(&self, expression: &str) -> Result<Option<XPathElement>> {
         let root = self.ui_tree().await?;
         Ok(XPathElement::query(self.clone(), &root, expression)?
@@ -286,6 +337,8 @@ impl HmDriver {
     }
 
     /// 通过 XPath 表达式查找所有匹配的 UI 元素。
+    ///
+    /// 按文档顺序返回快照；无匹配为空列表。表达式要求同 [`xpath`](Self::xpath)。
     pub async fn xpath_all(&self, expression: &str) -> Result<Vec<XPathElement>> {
         trace!(target: "hm_driver_rs::query", expression, "XPath 查询所有");
         let root = self.ui_tree().await?;
@@ -293,11 +346,15 @@ impl HmDriver {
     }
 
     /// 判断 XPath 表达式是否有匹配的元素。
+    ///
+    /// 重新采集并查询 UI 树；与 [`XPathElement::exists`] 的 bounds 快照检查不同。
     pub async fn xpath_exists(&self, expression: &str) -> Result<bool> {
         Ok(!self.xpath_all(expression).await?.is_empty())
     }
 
     /// 如果 XPath 匹配的元素存在则点击，返回是否点击成功。
+    ///
+    /// 未匹配返回 `false`，匹配后按快照中心点击；采集、表达式、bounds 或点击错误直接返回。
     pub async fn xpath_click_if_exists(&self, expression: &str) -> Result<bool> {
         let Some(element) = self.xpath_optional(expression).await? else {
             return Ok(false);

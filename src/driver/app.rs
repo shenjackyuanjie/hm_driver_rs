@@ -1,4 +1,7 @@
 //! 应用安装、启停与信息查询。
+//!
+//! 通过 HDC 安装/卸载应用，使用设备 `aa` / `bm` 命令管理应用和解析 Ability 元数据。
+//! 前台查询保留多窗口任务，URL 按浏览器或默认路由启动。公开入口集中在 [`HmDriver`]。
 
 use super::HmDriver;
 use crate::types::{AbilityInfo, AppIdentifier, OpenUrlMode, validate_ability};
@@ -10,7 +13,9 @@ use tracing::{debug, info, trace};
 use url::Url;
 
 impl HmDriver {
-    /// 安装应用（通过 HDC 发送 APK/HAP 到设备并安装）。
+    /// 通过 `hdc install` 安装主机上的应用包文件。
+    ///
+    /// 安装由 HDC 处理，使用 [`crate::HdcConfig::transfer_timeout`]；安装或传输失败返回 HDC 错误。
     pub async fn install_app(&self, package: impl AsRef<Path>) -> Result<()> {
         debug!(target: "hm_driver_rs::app", package = %package.as_ref().display(), "安装应用");
         self.inner.hdc.install(package.as_ref()).await.map(|_| ())
@@ -25,6 +30,9 @@ impl HmDriver {
     /// 启动应用。
     ///
     /// 如果不指定 ability，会自动查找应用的 main ability。
+    ///
+    /// Ability 名称规则见 [`validate_ability`]；显式名称非法返回 [`DriverError::InvalidIdentifier`]，
+    /// 自动解析未找到主 Ability 返回 [`DriverError::Protocol`]。
     pub async fn start_app(&self, bundle: &AppIdentifier, ability: Option<&str>) -> Result<()> {
         info!(target: "hm_driver_rs::app", bundle = %bundle.as_str(), ability = ?ability, "启动应用");
         let ability = match ability {
@@ -45,6 +53,9 @@ impl HmDriver {
     }
 
     /// 使用系统浏览器或默认方式打开 URL。
+    ///
+    /// 要求带 scheme 的可解析 URL，非法值返回 [`DriverError::InvalidUrl`]。
+    /// `SystemBrowser` 使用浏览器 action/entity，`Default` 使用系统默认路由。
     pub async fn open_url(&self, value: &str, mode: OpenUrlMode) -> Result<()> {
         debug!(target: "hm_driver_rs::app", url = %value, ?mode, "打开 URL");
         let url = Url::parse(value).map_err(|error| DriverError::InvalidUrl(error.to_string()))?;
@@ -86,6 +97,8 @@ impl HmDriver {
     }
 
     /// 查询应用的详细信息，返回 `bm dump` 的 JSON 输出。
+    ///
+    /// 截取输出中的 JSON 对象；缺少对象返回 [`DriverError::Protocol`]，JSON 格式错误返回 [`DriverError::Json`]。
     pub async fn app_info(&self, bundle: &AppIdentifier) -> Result<Value> {
         let output = self
             .inner
@@ -102,17 +115,24 @@ impl HmDriver {
     }
 
     /// 解析应用的 Ability 列表。
+    ///
+    /// 保留模块信息与原始元数据，未解析到 Ability 时返回空列表。
     pub async fn app_abilities(&self, bundle: &AppIdentifier) -> Result<Vec<AbilityInfo>> {
         Ok(parse_ability_infos(&self.app_info(bundle).await?))
     }
 
     /// 查询应用的 main ability 详情。
+    ///
+    /// 优先选启动器 Ability，再按主模块和模块 mainAbility 排序；无候选返回 `None`。
     pub async fn main_ability_info(&self, bundle: &AppIdentifier) -> Result<Option<AbilityInfo>> {
         let value = self.app_info(bundle).await?;
         Ok(select_main_ability(parse_ability_infos(&value)))
     }
 
     /// 查询应用的 main ability 名称。
+    ///
+    /// 先按 [`main_ability_info`](Self::main_ability_info) 的优先级选择，再回退元数据中的
+    /// `mainAbility` 字段；无名称返回 `None`。
     pub async fn main_ability(&self, bundle: &AppIdentifier) -> Result<Option<String>> {
         let value = self.app_info(bundle).await?;
         let abilities = parse_ability_infos(&value);
@@ -125,6 +145,8 @@ impl HmDriver {
     ///
     /// 分屏、自由窗口等场景可能同时存在多个前台任务；同一应用的多个任务也会
     /// 分别保留在返回结果中。
+    ///
+    /// 元组为 `(包名, Ability 名称)`；无前台任务返回空列表。
     pub async fn foreground_apps(&self) -> Result<Vec<(AppIdentifier, String)>> {
         trace!(target: "hm_driver_rs::app", "获取前台应用列表");
         let output = self.inner.hdc.shell("aa dump -l").await?;
@@ -140,10 +162,9 @@ impl HmDriver {
             .any(|(current, _)| current == *bundle))
     }
 
-    /// 获取第一个前台任务的应用。
+    /// 获取第一个前台任务的 `(包名, Ability 名称)`；无前台任务返回 `None`。
     ///
-    /// 若存在分屏或自由窗口，优先使用 [`foreground_apps`](Self::foreground_apps)
-    /// 或 [`is_app_foreground`](Self::is_app_foreground) 处理多前台任务场景。
+    /// 分屏或自由窗口时使用 [`foreground_apps`](Self::foreground_apps) 读取全部任务。
     pub async fn current_app(&self) -> Result<Option<(AppIdentifier, String)>> {
         Ok(self.foreground_apps().await?.into_iter().next())
     }

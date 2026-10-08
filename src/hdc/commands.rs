@@ -1,4 +1,8 @@
 //! 设备发现、shell/文件传输与端口转发命令。
+//!
+//! 为内部 HDC 执行器构造参数数组，按命令或传输类型选用超时。
+//! 设备选择区分唯一在线设备与显式序列号，转发移除在删除前后查询规则以确认结果；
+//! 输出解析由相邻 `parse` 模块完成。
 
 use super::{CommandOutput, HdcRunner};
 use crate::types::{DeviceDescriptor, DeviceSelector, DeviceStatus, ForwardEndpoint, ForwardEntry};

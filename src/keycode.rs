@@ -1,3 +1,9 @@
+//! OpenHarmony 按键码定义。
+//!
+//! [`KeyCode`] 提供系统导航、键盘、媒体与设备功能键的整数映射，并保留 `Unknown=-1`。
+//! 单键使用 [`crate::HmDriver::press_key_code`]，组合键使用
+//! [`crate::HmDriver::press_key_combination`]；原始扩展值可通过 [`crate::HmDriver::press_key`] 发送。
+
 /// OpenHarmony 常用按键码。
 ///
 /// 未列入枚举的平台扩展码仍可通过 `HmDriver::press_key(u32)` 发送。

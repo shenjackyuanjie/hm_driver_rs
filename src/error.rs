@@ -1,3 +1,9 @@
+//! 统一错误类型、错误格式及标准错误链。
+//!
+//! [`DriverError`] 区分配置、HDC、Agent、RPC、参数、查询和资源清理失败，
+//! [`Result`] 为各公开 API 提供统一返回类型。I/O 与 JSON 错误支持 `From` 转换，
+//! 转发清理错误保留关联的底层原因或原操作错误。
+
 use std::error::Error;
 use std::fmt;
 use std::path::PathBuf;
@@ -8,7 +14,11 @@ pub type Result<T> = std::result::Result<T, DriverError>;
 
 /// 驱动建立连接或执行操作时可能返回的错误。
 ///
-/// 支持标准 [`Error`] 错误链及 I/O、JSON 错误的自动转换。
+/// 支持标准 [`Error`] 错误链及 I/O、JSON 错误的自动转换，可跨线程传递。
+/// `HdcSpawn`、`RpcConnect`、`RpcIo`、`Io`、`Json` 和 `ForwardCleanup`
+/// 通过 `source()` 提供底层原因；
+/// [`ForwardCleanupAfterOperation`](Self::ForwardCleanupAfterOperation) 在字段中分别保存
+/// 操作错误与清理错误，便于同时处理。
 #[derive(Debug)]
 pub enum DriverError {
     /// 找不到 HDC 可执行文件。
@@ -73,7 +83,7 @@ pub enum DriverError {
         remote: String,
         /// 额外失败的清理操作数量。
         additional_failures: usize,
-        /// 导致清理失败的原操作错误。
+        /// 进入清理流程前发生的操作错误。
         operation: Box<DriverError>,
         /// 清理操作的错误原因。
         cleanup: Box<DriverError>,
@@ -111,15 +121,15 @@ pub enum DriverError {
     ElementNotFound,
     /// 未找到匹配的窗口。
     WindowNotFound,
-    /// XPath 表达式语法无效。
+    /// XPath 表达式语法/求值错误或结果不是节点集合。
     InvalidXPath(String),
     /// XPath 查询未匹配到任何节点。
     XPathNotFound,
     /// 阻塞 API 在 Tokio 异步上下文中被调用。
     BlockingInAsyncContext,
-    /// Driver 实例已关闭，无法继续使用。
+    /// Driver 共享会话已关闭，RPC 入口结束使用。
     DriverClosed,
-    /// 当前 API 方言不支持该操作。
+    /// 当前设备、工具、API Level、方言或查询方式不支持该操作。
     Unsupported(String),
 }
 

@@ -1,3 +1,8 @@
+//! 公开错误类型的集成回归测试。
+//!
+//! 覆盖所有错误消息、标准 source 链、复合清理错误、I/O/JSON 转换及 `?` 运算符，
+//! 并验证 [`DriverError`] 的标准错误和跨线程约束。测试使用本地构造数据。
+
 use hm_driver_rs::DriverError;
 use std::error::Error;
 use std::io;

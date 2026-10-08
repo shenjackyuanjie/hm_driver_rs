@@ -1,4 +1,8 @@
-//! 窗口查询。
+//! 窗口定位与当前窗口尺寸查询。
+//!
+//! 将 [`WindowFilter`] 组合条件传给 Agent，返回 [`UiWindow`] 远端句柄。
+//! 当前窗口优先查活动窗口，再查聚焦窗口；没有匹配时使用 `None` 表示，
+//! 尺寸通过窗口 bounds 换算为像素宽高。
 
 use super::HmDriver;
 use crate::{DriverError, Result, UiWindow, WindowFilter};
@@ -7,6 +11,8 @@ use tracing::trace;
 
 impl HmDriver {
     /// 按组合条件查找窗口。
+    ///
+    /// 组合条件至少包含一项，否则返回 [`DriverError::InvalidArgument`]；无匹配返回 `None`。
     pub async fn find_window(&self, filter: &WindowFilter) -> Result<Option<UiWindow>> {
         trace!(target: "hm_driver_rs::window", ?filter, "查找窗口");
         if filter.is_empty() {
@@ -22,6 +28,8 @@ impl HmDriver {
     }
 
     /// 获取当前活动窗口，找不到时回退到聚焦窗口。
+    ///
+    /// 两次查询均无匹配时返回 `None`，查询错误直接返回。
     pub async fn current_window(&self) -> Result<Option<UiWindow>> {
         if let Some(window) = self.find_window(&WindowFilter::new().active(true)).await? {
             return Ok(Some(window));
@@ -30,6 +38,8 @@ impl HmDriver {
     }
 
     /// 获取当前窗口大小。
+    ///
+    /// 返回 `(宽度, 高度)`，单位像素；无当前窗口返回 `None`，无效边界返回 [`DriverError::Protocol`]。
     pub async fn window_size(&self) -> Result<Option<(u32, u32)>> {
         let Some(window) = self.current_window().await? else {
             return Ok(None);

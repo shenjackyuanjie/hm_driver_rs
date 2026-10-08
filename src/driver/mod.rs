@@ -7,6 +7,8 @@
 //! - [`app`]：应用安装、启停与信息查询。
 //! - [`files`]：文件推拉、原始 shell 与截图。
 //! - [`query`]：UI 树、选择器查找与 XPath。
+//! - [`events`]：一次性 Toast/UI 事件监听。
+//! - [`window`]：窗口定位与当前窗口尺寸。
 //! - [`system`]：剪贴板、显示模式、时间/时区、字体与网络模拟。
 
 mod app;
@@ -50,13 +52,13 @@ fn next_operation_id() -> String {
 /// Driver 的运行时配置。
 #[derive(Clone, Debug)]
 pub struct DriverConfig {
-    /// 单次 RPC 调用的超时时间（默认 20 秒）。
+    /// 单次 RPC 请求写入与响应读取的超时时间（默认 20 秒），不含等待其他请求释放连接的时间。
     pub rpc_timeout: Duration,
     /// RPC 帧的最大字节数（默认 8 MiB）。
     pub max_rpc_frame_size: usize,
     /// 关闭 Driver 时是否同时杀死设备端的 singleness daemon。
     pub kill_daemon_on_close: bool,
-    /// 批量释放远端引用的队列阈值（默认 20）。
+    /// 批量释放远端引用的队列阈值（默认 20）；在后续 RPC 前达到阈值时触发清理。
     pub cleaner_batch_size: usize,
 }
 
@@ -72,13 +74,16 @@ impl Default for DriverConfig {
 }
 
 /// 创建异步 Driver 的 Builder。
+///
+/// 默认自动选择唯一在线设备，使用 [`HdcConfig::default`]、[`DriverConfig::default`]
+/// 和 [`AgentSource::Embedded`]。链式设置按调用顺序生效。
 #[derive(Clone, Debug, Default)]
 pub struct HmDriverBuilder {
-    /// 目标设备选择器（序列号 / USB / 网络）。
+    /// 目标设备选择器（自动选择 / 指定序列号）。
     selector: DeviceSelector,
     /// HDC 连接配置（路径 / 服务地址）。
     hdc: HdcConfig,
-    /// Agent 来源（APK / Hap 包路径）。
+    /// 官方 Agent 动态库来源（内嵌资源 / 外部目录）。
     agent_source: AgentSource,
     /// 驱动运行时配置（超时、帧大小等）。
     config: DriverConfig,
@@ -86,30 +91,41 @@ pub struct HmDriverBuilder {
 
 impl HmDriverBuilder {
     /// 设置目标设备选择器。
+    ///
+    /// `Auto` 要求恰好一台在线设备；多设备时用 [`DeviceSelector::Serial`] 指定目标。
     pub fn device(mut self, selector: DeviceSelector) -> Self {
         self.selector = selector;
         self
     }
 
     /// 设置 hdc 可执行文件的路径。
+    ///
+    /// 优先于 `HDC_PATH` 和 `PATH`；连接时解析并固定可执行文件绝对路径。
     pub fn hdc_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.hdc.path = Some(path.into());
         self
     }
 
     /// 设置 hdc server 的地址和端口。
+    ///
+    /// 优先于 `HDC_SERVER_HOST` / `HDC_SERVER_PORT`；成对变量解析为显式服务地址，
+    /// 只有单个变量时交由 HDC 自身解释。连接时校验地址，端口须大于零。
     pub fn hdc_server(mut self, host: impl Into<String>, port: u16) -> Self {
         self.hdc.server = Some((host.into(), port));
         self
     }
 
     /// 直接使用完整的 HDC 配置。
+    ///
+    /// 替换此前的全部 HDC 设置，之后的 `hdc_path` / `hdc_server` 继续覆盖对应字段。
     pub fn hdc_config(mut self, config: HdcConfig) -> Self {
         self.hdc = config;
         self
     }
 
-    /// 设置 Agent 固件来源（内置或外部路径）。
+    /// 设置官方 Agent 动态库来源（内嵌资源或外部目录）。
+    ///
+    /// 外部目录内文件须与 catalog 的文件名、大小和 SHA-256 一致，连接时进行校验。
     pub fn agent_source(mut self, source: AgentSource) -> Self {
         self.agent_source = source;
         self
@@ -124,6 +140,11 @@ impl HmDriverBuilder {
     /// 连接设备并建立 Hypium RPC 会话。
     ///
     /// 内部流程：发现设备 → 探测架构/版本 → 推送 Agent → 建立端口转发 → 创建远端 Driver。
+    ///
+    /// 在 Tokio runtime 中执行。无在线设备返回 [`DriverError::DeviceNotFound`]，
+    /// 自动选择遇到多台设备返回 [`DriverError::AmbiguousDevice`]，指定设备未在线返回
+    /// [`DriverError::DeviceOffline`]。其余错误包括 HDC 配置、架构/版本解析、Agent 文件
+    /// 校验、启动、转发及 RPC 初始化失败。
     pub async fn connect(self) -> Result<HmDriver> {
         info!(target: "hm_driver_rs::driver", "开始连接设备");
         let discovery = HdcRunner::new(self.hdc)?;
@@ -169,6 +190,22 @@ impl HmDriverBuilder {
 }
 
 /// 一个设备上的异步 HarmonyOS Driver。
+///
+/// `Clone` 共享同一 RPC 会话、引用清理队列与 UI 事件监听状态。
+/// RPC 请求串行执行；在途请求超时、取消或连接断开后，通过 [`recover`](Self::recover)
+/// 显式重建会话，再由调用方决定后续操作。
+///
+/// 控件和窗口是远端句柄，UI 树和 XPath 属性是采集时的主机快照。
+/// 用完句柄后调用 [`close`](Self::close) 等待清理；最后一个引用释放时会安排后台清理。
+/// HDC 命令采用 [`HdcConfig`] 的超时，RPC 默认采用 [`DriverConfig::rpc_timeout`]。
+///
+/// # 错误与设备要求
+///
+/// 参数错误在对应方法说明中列出；设备命令失败返回 [`DriverError::HdcCommand`]，
+/// Agent API 异常返回 [`DriverError::Hypium`]，响应格式不符返回 [`DriverError::Protocol`]。
+/// RPC 超时返回 [`DriverError::RpcTimeout`]，失效会话返回 [`DriverError::SessionInvalid`]。
+/// 已知 API Level 不足时返回 [`DriverError::Unsupported`]；版本未知时直接尝试设备能力。
+/// HDC 文件、shell 和应用辅助操作直接使用设备连接。
 #[derive(Clone)]
 pub struct HmDriver {
     pub(crate) inner: Arc<HmDriverInner>,
@@ -313,23 +350,29 @@ impl HmDriver {
     }
 
     /// 使用当前 HDC 配置发现设备，不建立 Agent 会话。
+    ///
+    /// 返回 HDC 报告的设备列表（含非在线状态）；无设备时返回空列表。HDC 配置和命令错误直接返回。
     pub async fn discover_devices(
         config: HdcConfig,
     ) -> Result<Vec<crate::types::DeviceDescriptor>> {
         HdcRunner::new(config)?.discover().await
     }
 
-    /// 返回当前使用的 Agent 固件信息。
+    /// 返回当前使用的 Agent 版本、架构、文件校验和传输信息。
     pub fn agent_profile(&self) -> &AgentProfile {
         &self.inner.profile
     }
 
     /// 返回当前会话的代际编号，用于区分远端引用归属的会话。
+    ///
+    /// 初始为 `1`，每次成功 [`recover`](Self::recover) 后递增。
     pub fn generation(&self) -> u64 {
         self.inner.generation.load(Ordering::Acquire)
     }
 
     /// 返回当前会话协商出的 Hypium API 方言（Modern/Legacy）。
+    ///
+    /// 会话未建立或已关闭时返回 [`DriverError::SessionInvalid`]。
     pub async fn dialect(&self) -> Result<ApiDialect> {
         self.inner
             .state
@@ -362,6 +405,8 @@ impl HmDriver {
     ///
     /// `api` 为完整方法名（如 `"Driver.click"`），`this` 为可选的远端对象引用，
     /// `args` 为 JSON 参数数组。适用于当前能力未覆盖的高级场景。
+    ///
+    /// 返回未经类型转换的 JSON 结果。调用方管理自行创建的远端引用；RPC 错误按原类型返回。
     pub async fn call_hypium_api(
         &self,
         api: &str,
@@ -393,9 +438,13 @@ impl HmDriver {
         rpc.call(api, this, args).await
     }
 
-    /// 恢复已断开的会话（重新推送 Agent、建立端口转发、创建远端 Driver）。
+    /// 恢复已断开的会话，重新部署 Agent、建立转发并创建远端 Driver。
     ///
-    /// 调用后会话代际递增，所有之前获取的 [`Element`](crate::Element) 和 [`XPathElement`](crate::XPathElement) 将失效。
+    /// 恢复成功后会话代际递增，重置 UI 事件监听状态。已有 [`Element`](crate::Element)
+    /// 和 [`UiWindow`](crate::UiWindow) 在下一次操作时按原条件及索引重新定位；
+    /// [`XPathElement`](crate::XPathElement) 保留原快照，需要重新查询以取得当前坐标。
+    /// 恢复失败时返回部署、转发清理或 RPC 错误，调用方可再次恢复；已关闭的 Driver
+    /// 返回 [`DriverError::DriverClosed`]。操作由调用方安排重试。
     pub async fn recover(&self) -> Result<()> {
         warn!(target: "hm_driver_rs::driver", "开始恢复会话");
         let mut state = self.inner.state.lock().await;
@@ -437,10 +486,14 @@ impl HmDriver {
         Ok(())
     }
 
-    /// 主动关闭会话并清理资源。
+    /// 主动关闭共享会话并等待资源清理。
     ///
-    /// 释放所有远端引用、移除端口转发，若 [`DriverConfig::kill_daemon_on_close`] 为 `true`
-    /// 还将在设备端停止 singleness daemon。
+    /// 先处理已排队的远端引用，再关闭 RPC、移除驱动创建的转发；
+    /// [`DriverConfig::kill_daemon_on_close`] 为 `true` 时还会停止 singleness daemon。
+    /// 自定义 [`forward`](Self::forward) 由调用方移除，系统设置和网络场景由调用方恢复。
+    /// 清理错误会返回给调用方，会话仍标记为关闭；再次关闭返回 `Ok(())`。
+    /// 共享此会话的克隆及远端句柄同时结束使用，后续 RPC 根据入口返回
+    /// [`DriverError::DriverClosed`] 或 [`DriverError::SessionInvalid`]。
     pub async fn close(&self) -> Result<()> {
         debug!(target: "hm_driver_rs::driver", "关闭会话");
         let cleaner_error = self.flush_cleaner(true).await.err();

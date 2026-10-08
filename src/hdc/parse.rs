@@ -1,4 +1,8 @@
-//! HDC 可执行文件解析、server 环境变量与命令输出解析。
+//! HDC 可执行文件、服务地址与命令输出解析。
+//!
+//! 按显式配置、环境变量及 PATH 解析并固定可执行文件，验证服务地址和端口。
+//! 解析设备状态与 TCP/抽象套接字转发端点，保留未知状态和端点供调用方检查；
+//! 执行与超时管理由上层 HDC 执行器负责。
 
 use crate::types::{DeviceDescriptor, DeviceSerial, DeviceStatus, ForwardEndpoint, ForwardEntry};
 use crate::{DriverError, Result};

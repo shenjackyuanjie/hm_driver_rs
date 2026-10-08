@@ -1,4 +1,8 @@
-//! 控件选择器：可串联多个官方 On/By 条件，并可解析为远端已定位控件。
+//! 控件选择器与文本匹配规则。
+//!
+//! [`Selector`] 按顺序串联官方 On/By 条件，支持字符串、状态、窗口与远端关系条件。
+//! [`MatchPattern`] 同时支持远端参数编码和主机字符串匹配；本地 UI 快照查询复用
+//! 属性规则，关系条件交给 Agent 解析。定位后返回 [`Element`] 句柄。
 
 mod element;
 
@@ -42,6 +46,8 @@ impl MatchPattern {
     }
 
     /// 在主机端按当前匹配模式检查文本。
+    ///
+    /// 使用变体内的字符串作为匹配值；非法正则返回 [`DriverError::InvalidArgument`]。
     pub fn matches(&self, actual: &str) -> Result<bool> {
         let expected = match self {
             Self::Equals(value)
@@ -102,6 +108,20 @@ enum SelectorCondition {
 }
 
 /// 可串联多个官方 On/By 条件的控件选择器。
+///
+/// 条件以 AND 组合，重复属性条件也会追加；`&str` 和 `String` 自动转为精确匹配。
+/// 默认选择匹配列表的第 `0` 项，全部查询忽略索引。构造只保存条件，定位时执行查询。
+///
+/// ```
+/// use hm_driver_rs::{MatchPattern, Selector};
+/// let selector = Selector::new()
+///     .type_name("Button")
+///     .text(MatchPattern::Contains("确定".into()))
+///     .enabled(true)
+///     .index(1);
+/// assert!(MatchPattern::Regex("^确".into()).matches("确定")?);
+/// # Ok::<(), hm_driver_rs::DriverError>(())
+/// ```
 #[derive(Clone, Debug, Default)]
 pub struct Selector {
     conditions: Vec<SelectorCondition>,
@@ -130,6 +150,8 @@ impl Selector {
     }
 
     /// 按控件的原始文本内容匹配。
+    ///
+    /// 远端通过 `On.originalText` 定位，支持情况由设备 Agent 返回；本地按 `originalText` 属性匹配。
     pub fn original_text(self, pattern: impl Into<MatchPattern>) -> Self {
         self.string("originalText", pattern.into())
     }
@@ -190,6 +212,8 @@ impl Selector {
     }
 
     /// 限定目标控件位于另一个控件之前。
+    ///
+    /// 关系由远端 Agent 解析，本地 [`crate::UiNode`] 查询此条件返回 [`DriverError::Unsupported`]。
     pub fn before(mut self, selector: Selector) -> Self {
         self.conditions
             .push(SelectorCondition::Before(Box::new(selector)));
@@ -197,6 +221,8 @@ impl Selector {
     }
 
     /// 限定目标控件位于另一个控件之后。
+    ///
+    /// 关系由远端 Agent 解析，本地 [`crate::UiNode`] 查询此条件返回 [`DriverError::Unsupported`]。
     pub fn after(mut self, selector: Selector) -> Self {
         self.conditions
             .push(SelectorCondition::After(Box::new(selector)));
@@ -204,6 +230,8 @@ impl Selector {
     }
 
     /// 限定目标控件位于另一个控件内部。
+    ///
+    /// 关系由远端 Agent 解析，本地 [`crate::UiNode`] 查询此条件返回 [`DriverError::Unsupported`]。
     pub fn within(mut self, selector: Selector) -> Self {
         self.conditions
             .push(SelectorCondition::Within(Box::new(selector)));
@@ -211,13 +239,17 @@ impl Selector {
     }
 
     /// 限定目标控件位于指定应用窗口。
+    ///
+    /// `bundle` 是应用包名；本地快照按节点 `bundleName`（缺省时回退 `bundle`）属性匹配。
     pub fn in_window(mut self, bundle: &crate::AppIdentifier) -> Self {
         self.conditions
             .push(SelectorCondition::InWindow(bundle.as_str().to_owned()));
         self
     }
 
-    /// 设置目标控件在同级匹配结果中的索引（从 0 开始）。
+    /// 设置目标在整个匹配结果列表中的索引（从 `0` 开始）。
+    ///
+    /// 影响单个查找和存在性判断；远端和本地的 `find_all` / `count` 保留全部匹配。
     pub fn index(mut self, index: usize) -> Self {
         self.index = index;
         self

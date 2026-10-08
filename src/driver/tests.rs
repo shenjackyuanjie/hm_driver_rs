@@ -1,3 +1,9 @@
+//! Driver 行为与协议回归测试。
+//!
+//! 使用本地模拟 RPC 验证参数、引用清理、查询截止时间、API Level 和输入序列；
+//! 纯数据测试覆盖设备输出、Ability 排序与 daemon 匹配。该模块通过 `cfg(test)` 加载，
+//! 真机操作单独位于 `tests/smoke.rs`。
+
 use super::app::{parse_ability_infos, select_main_ability, shell_quote};
 use super::device::{parse_screen_state, parse_wlan_ip, should_toggle_for_screen_off};
 use super::session::{extract_four_part_version, singleness_pids};

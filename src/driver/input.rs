@@ -1,4 +1,8 @@
-//! 点击、滑动、按键与手势注入。
+//! 点击、滑动、按键与多种输入设备注入。
+//!
+//! 提供触控、鼠标、触控笔、指关节、触控板及表冠操作；按入口使用 Hypium RPC 或设备
+//! 输入命令。归一化位置按当前显示尺寸换算，自定义轨迹编译为 PointerMatrix；
+//! 速度、时长、压力和 API Level 要求分别在公开方法中说明。
 
 use super::HmDriver;
 use crate::gesture::Gesture;
@@ -13,6 +17,8 @@ impl HmDriver {
     /// 通过按键码（原始值）发送按键事件。
     ///
     /// 按键码范围 0–3200；需要类型安全的按键码请使用 [`press_key_code`](Self::press_key_code) 或 [`KeyCode`]。
+    ///
+    /// 超出范围返回 [`DriverError::InvalidCoordinate`]；使用 `uitest uiInput keyEvent` 命令。
     pub async fn press_key(&self, key_code: u32) -> Result<()> {
         trace!(target: "hm_driver_rs::input", key_code, "按键事件");
         if key_code > 3200 {
@@ -36,12 +42,16 @@ impl HmDriver {
     }
 
     /// 通过 [`KeyCode`] 枚举发送按键事件。
+    ///
+    /// 与原始值入口相同，支持枚举中的 `Unknown=-1`。
     pub async fn press_key_code(&self, key_code: KeyCode) -> Result<()> {
         trace!(target: "hm_driver_rs::input", key = %key_code.value(), "按键(KeyCode)");
         self.send_key_code(key_code.value()).await
     }
 
     /// 同时触发两个或三个组合键。
+    ///
+    /// 按键数不为 `2` 或 `3` 返回 [`DriverError::InvalidArgument`]，通过 RPC 注入。
     pub async fn press_key_combination(&self, key_codes: &[KeyCode]) -> Result<()> {
         if !(2..=3).contains(&key_codes.len()) {
             return Err(DriverError::InvalidArgument(
@@ -105,6 +115,9 @@ impl HmDriver {
     }
 
     /// 在指定绝对坐标处长按给定时长。
+    ///
+    /// 使用设备端 `uinput -T`，时长大于零，按整数毫秒传递且须可表示为 `u32`，
+    /// 非法时长返回 [`DriverError::InvalidArgument`]。
     pub async fn long_click_for(&self, point: Point, duration: Duration) -> Result<()> {
         let millis = duration_millis(duration, "触控长按时长")?;
         self.inner
@@ -115,6 +128,8 @@ impl HmDriver {
     }
 
     /// 在指定绝对或归一化位置长按给定时长。
+    ///
+    /// 位置按当前显示尺寸换算，时长规则见 [`long_click_for`](Self::long_click_for)。
     pub async fn long_click_position_for(
         &self,
         position: Position,
@@ -125,6 +140,8 @@ impl HmDriver {
     }
 
     /// 从起点滑动到终点，`speed` 为滑动速度（200–40000 像素/秒）。
+    ///
+    /// 速度非法返回 [`DriverError::InvalidCoordinate`]。
     pub async fn swipe(&self, from: Point, to: Point, speed: u32) -> Result<()> {
         trace!(target: "hm_driver_rs::input", from = %format!("({},{})", from.x, from.y), to = %format!("({},{})", to.x, to.y), speed, "滑动");
         if !(200..=40_000).contains(&speed) {
@@ -138,6 +155,9 @@ impl HmDriver {
 
     /// 从起点滑动到终点，`duration_ms` 为滑动持续时间（毫秒）。
     /// 内部根据距离与持续时间自动计算所需速度，再调用底层 `swipe` API。
+    ///
+    /// 时长须大于零，计算速度按像素距离四舍五入并须落在 `200..=40000`；
+    /// 不满足时返回 [`DriverError::InvalidCoordinate`]。
     pub async fn swipe_with_duration_ms(
         &self,
         from: Point,
@@ -164,6 +184,8 @@ impl HmDriver {
     }
 
     /// 从归一化或绝对坐标位置滑动到目标位置。
+    ///
+    /// 归一化坐标按当前显示尺寸换算，速度范围及错误见 [`swipe`](Self::swipe)。
     pub async fn swipe_positions(&self, from: Position, to: Position, speed: u32) -> Result<()> {
         let size = self.display_size().await?;
         self.swipe(from.resolve(size)?, to.resolve(size)?, speed)
@@ -171,6 +193,8 @@ impl HmDriver {
     }
 
     /// 从一个绝对坐标拖拽到另一个绝对坐标。
+    ///
+    /// 速度为 `200..=40000`，超出范围返回 [`DriverError::InvalidArgument`]。
     pub async fn drag(&self, from: Point, to: Point, speed: u32) -> Result<()> {
         trace!(target: "hm_driver_rs::input", from = %format!("({},{})", from.x, from.y), to = %format!("({},{})", to.x, to.y), speed, "拖拽");
         validate_motion_speed(speed)?;
@@ -180,6 +204,8 @@ impl HmDriver {
     }
 
     /// 接受绝对或归一化坐标的拖拽操作。
+    ///
+    /// 归一化坐标按当前显示尺寸换算，速度约束见 [`drag`](Self::drag)。
     pub async fn drag_positions(&self, from: Position, to: Position, speed: u32) -> Result<()> {
         let size = self.display_size().await?;
         self.drag(from.resolve(size)?, to.resolve(size)?, speed)
@@ -187,6 +213,8 @@ impl HmDriver {
     }
 
     /// 执行带固定步长的抛滑操作。
+    ///
+    /// 步长以像素计且大于零，速度为 `200..=40000`，非法参数返回 [`DriverError::InvalidArgument`]。
     pub async fn fling(&self, from: Point, to: Point, step_length: u32, speed: u32) -> Result<()> {
         validate_motion_speed(speed)?;
         if step_length == 0 {
@@ -198,6 +226,8 @@ impl HmDriver {
     }
 
     /// 接受绝对或归一化坐标的抛滑操作。
+    ///
+    /// 坐标按当前显示尺寸换算，步长和速度约束见 [`fling`](Self::fling)。
     pub async fn fling_positions(
         &self,
         from: Position,
@@ -212,7 +242,8 @@ impl HmDriver {
 
     /// 在指定区域内按方向滑动一定比例。
     ///
-    /// `area` 指定滑动区域，`scale` 为滑动距离与区域尺寸的比例（0–1）。
+    /// `area` 指定滑动区域，`scale` 为有限数且满足 `0 < scale <= 1`，
+    /// `speed` 为 `200..=40000`；无效区域、比例或速度返回 [`DriverError::InvalidCoordinate`]。
     pub async fn swipe_direction(
         &self,
         direction: SwipeDirection,
@@ -251,6 +282,9 @@ impl HmDriver {
     }
 
     /// 执行一个多指手势轨迹。
+    ///
+    /// 先按当前显示尺寸采样并创建 PointerMatrix，再注入；坐标解析、点数/时间编码及
+    /// 设备 RPC 错误直接返回。轨迹约束见 [`Gesture`]。
     pub async fn perform_gesture(&self, gesture: &Gesture) -> Result<()> {
         debug!(target: "hm_driver_rs::input", "执行手势");
         let reference = self.create_pointer_matrix(gesture).await?;
@@ -281,6 +315,8 @@ impl HmDriver {
     }
 
     /// 使用绝对或归一化位置执行指关节敲击。
+    ///
+    /// 坐标按当前显示尺寸换算，点数、次数及 API Level 约束同 [`knuckle_knock`](Self::knuckle_knock)。
     pub async fn knuckle_knock_positions(&self, positions: &[Position], times: u8) -> Result<()> {
         validate_knuckle_knock(positions.len(), times)?;
         self.require_api_level(22, "指关节敲击").await?;
@@ -296,6 +332,8 @@ impl HmDriver {
     /// 使用指关节注入自定义轨迹。
     ///
     /// 该能力需要 API Level 22 及以上。
+    ///
+    /// 轨迹编译约束同 [`perform_gesture`](Self::perform_gesture)。
     pub async fn perform_knuckle_gesture(&self, gesture: &Gesture) -> Result<()> {
         self.require_api_level(22, "指关节轨迹").await?;
         let reference = self.create_pointer_matrix(gesture).await?;
@@ -319,6 +357,8 @@ impl HmDriver {
     }
 
     /// 以绝对或归一化中心位置执行指关节闭合圈选。
+    ///
+    /// 坐标按当前显示尺寸换算，约束同 [`knuckle_select`](Self::knuckle_select)。
     pub async fn knuckle_select_position(
         &self,
         center: Position,
@@ -331,6 +371,8 @@ impl HmDriver {
     }
 
     /// 鼠标单击，支持同时按住最多两个键盘按键。
+    ///
+    /// `keys` 可为空；超过两个返回 [`DriverError::InvalidArgument`]。
     pub async fn mouse_click(
         &self,
         point: Point,
@@ -344,6 +386,8 @@ impl HmDriver {
     }
 
     /// 在绝对或归一化位置执行鼠标单击。
+    ///
+    /// 坐标按当前显示尺寸换算；按键数规则见 [`mouse_click`](Self::mouse_click)。
     pub async fn mouse_click_position(
         &self,
         position: Position,
@@ -355,6 +399,8 @@ impl HmDriver {
     }
 
     /// 鼠标双击，支持同时按住最多两个键盘按键。
+    ///
+    /// `keys` 可为空；超过两个返回 [`DriverError::InvalidArgument`]。
     pub async fn mouse_double_click(
         &self,
         point: Point,
@@ -368,6 +414,8 @@ impl HmDriver {
     }
 
     /// 鼠标长按，支持同时按住最多两个键盘按键。
+    ///
+    /// `keys` 可为空；超过两个返回 [`DriverError::InvalidArgument`]。
     pub async fn mouse_long_click(
         &self,
         point: Point,
@@ -381,6 +429,9 @@ impl HmDriver {
     }
 
     /// 通过系统输入命令执行指定时长的鼠标长按。
+    ///
+    /// 使用设备端 `uinput -M`，时长大于零并按 `u32` 整数毫秒传递；
+    /// 非法时长返回 [`DriverError::InvalidArgument`]。
     pub async fn mouse_long_click_for(
         &self,
         point: Point,
@@ -403,6 +454,9 @@ impl HmDriver {
     }
 
     /// 滚动鼠标滚轮。正数向前/向上，负数向后/向下。
+    ///
+    /// `distance` 的绝对值作为滚轮步数，须非零；`keys` 最多两个，非法参数返回
+    /// [`DriverError::InvalidArgument`]。
     pub async fn mouse_scroll(&self, point: Point, distance: i32, keys: &[KeyCode]) -> Result<()> {
         if distance == 0 {
             return Err(DriverError::InvalidArgument("鼠标滚轮距离不能为 0".into()));
@@ -427,6 +481,8 @@ impl HmDriver {
     }
 
     /// 按给定速度沿轨迹移动鼠标。
+    ///
+    /// 速度为 `200..=40000`，超出范围返回 [`DriverError::InvalidArgument`]。
     pub async fn mouse_move(&self, from: Point, to: Point, speed: u32) -> Result<()> {
         validate_motion_speed(speed)?;
         self.driver_call("mouseMoveWithTrack", json!([from, to, speed]))
@@ -435,6 +491,8 @@ impl HmDriver {
     }
 
     /// 按住鼠标左键拖拽。
+    ///
+    /// 速度为 `200..=40000`，超出范围返回 [`DriverError::InvalidArgument`]。
     pub async fn mouse_drag(&self, from: Point, to: Point, speed: u32) -> Result<()> {
         validate_motion_speed(speed)?;
         self.driver_call("mouseDrag", json!([from, to, speed]))
@@ -457,6 +515,9 @@ impl HmDriver {
     }
 
     /// 触控笔长按，可指定 0 到 1 的压力。
+    ///
+    /// `pressure=None` 使用设备默认值，指定值须为有限数且在 `0.0..=1.0`，
+    /// 非法值返回 [`DriverError::InvalidArgument`]。
     pub async fn pen_long_click(&self, point: Point, pressure: Option<f64>) -> Result<()> {
         validate_pressure(pressure)?;
         self.driver_call("penLongClick", json!([point, pressure]))
@@ -465,6 +526,9 @@ impl HmDriver {
     }
 
     /// 触控笔滑动，可指定速度和压力。
+    ///
+    /// 速度为 `200..=40000`，压力规则同 [`pen_long_click`](Self::pen_long_click)；
+    /// 非法参数返回 [`DriverError::InvalidArgument`]。
     pub async fn pen_swipe(
         &self,
         from: Point,
@@ -480,6 +544,9 @@ impl HmDriver {
     }
 
     /// 使用触控笔注入自定义轨迹。
+    ///
+    /// 轨迹编译约束同 [`perform_gesture`](Self::perform_gesture)，压力规则同
+    /// [`pen_long_click`](Self::pen_long_click)。
     pub async fn perform_pen_gesture(
         &self,
         gesture: &Gesture,
@@ -499,6 +566,9 @@ impl HmDriver {
     }
 
     /// 模拟触控板多指滑动。
+    ///
+    /// `fingers` 为 `1..=10`，`hold_at_end` 控制末尾停留，`speed=None` 使用设备默认速度；
+    /// 指定速度须为 `200..=40000`，非法参数返回 [`DriverError::InvalidArgument`]。
     pub async fn touchpad_swipe(
         &self,
         direction: SwipeDirection,
@@ -528,6 +598,8 @@ impl HmDriver {
     }
 
     /// 旋转手表表冠。正步数为顺时针，负步数为逆时针。
+    ///
+    /// `steps` 须非零，`speed` 为可选的 `1..=500` 格/秒；非法值返回 [`DriverError::InvalidArgument`]。
     pub async fn rotate_crown(&self, steps: i32, speed: Option<u16>) -> Result<()> {
         if steps == 0 {
             return Err(DriverError::InvalidArgument("表冠步数不能为 0".into()));
@@ -570,6 +642,8 @@ impl HmDriver {
     }
 
     /// 清空当前获得焦点的输入框。
+    ///
+    /// 依次发送 Ctrl+A 和 Delete，两次操作后各等待 500 毫秒；按键失败直接返回。
     pub async fn clear_text_on_current_cursor(&self) -> Result<()> {
         self.press_key_combination(&[KeyCode::CtrlLeft, KeyCode::A])
             .await?;
@@ -580,6 +654,9 @@ impl HmDriver {
     }
 
     /// 等待 UI 连续空闲指定时长，最长等待 `timeout`。
+    ///
+    /// 两个时长均大于零，按 `u32` 整数毫秒传给设备，非法参数返回 [`DriverError::InvalidArgument`]。
+    /// 此方法的主机 RPC 超时使用 `timeout + 1 秒`，覆盖默认 RPC 超时。
     pub async fn wait_for_idle(&self, idle_time: Duration, timeout: Duration) -> Result<()> {
         trace!(target: "hm_driver_rs::input", ?idle_time, ?timeout, "等待 UI 空闲");
         let idle_millis = duration_millis(idle_time, "UI 空闲时长")?;

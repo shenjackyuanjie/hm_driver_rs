@@ -126,7 +126,7 @@ async fn main() -> Result<()> {
 - HDC 可执行文件路径和 HDC server 地址；
 - 普通命令超时，默认 10 秒；
 - 文件传输超时，默认 60 秒；
-- Agent 通信超时，默认 10 秒。
+- singleness daemon 启动命令和启动检查超时，默认 10 秒。
 
 Builder 还可通过 `DriverConfig` 调整 RPC 超时（默认 20 秒）、RPC 最大帧大小（默认
 8 MiB）、关闭时是否停止设备端 singleness daemon，以及远端引用批量清理阈值。
@@ -135,12 +135,17 @@ Builder 还可通过 `DriverConfig` 调整 RPC 超时（默认 20 秒）、RPC �
 
 ## 等待、超时和会话恢复
 
-- `wait_for()`、`wait_for_xpath()`、`wait_for_ui()` 等等待使用总截止时间；单次慢 RPC
-  不会突破调用方给出的超时；
-- `wait_for()`、`wait_for_xpath()` 和 UI 树等待在超时后分别返回
-  `ElementNotFound` 或 `XPathNotFound`；
+- `wait_for()`、`wait_for_xpath()` 和异步条件等待以总截止时间约束单次异步查询和休眠，
+  默认轮询间隔为 100 毫秒；
+- UI 树等待（含 `wait_for_text()`）在每次采集前检查截止时间；单次采集按 HDC 命令和
+  文件传输超时执行，同步谓词执行至返回，因此一次采集及判断可越过等待截止时间；
+- 元素和 UI 树等待超时返回 `ElementNotFound`，XPath 等待超时返回 `XPathNotFound`；
 - `wait_until()` 和 `wait_until_with_interval()` 用于任意异步条件，超时返回 `false`；
+- 阻塞门面的条件等待在普通调用线程运行，每次调用条件前检查截止时间，单次同步
+  闭包的耗时由调用方控制；
 - `wait_for_app()`、`wait_until_xpath_gone()` 和 `Element` 的等待方法覆盖常见状态等待。
+
+UI 树等待单次采集纳入总截止时间，逐项记录在 [待补扩展](hypium-alignment.md#其他待补扩展)。
 
 每个 Driver 使用单一 RPC 连接，同一时刻最多有一个在途请求。连接断开、RPC 超时或
 取消正在进行的请求后，会话立即失效；驱动不会自动重放点击、输入等非幂等操作。此时

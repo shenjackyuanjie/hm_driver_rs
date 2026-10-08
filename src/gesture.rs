@@ -1,3 +1,9 @@
+//! 自定义触控轨迹与多指采样编译。
+//!
+//! [`GesturePath`] 描述起点保持、移动和暂停，[`Gesture`] 组合多根手指并配置采样间隔
+//! 与注入速度。执行前按照当前显示区域解析位置，采样并补齐较短轨迹，生成设备
+//! PointerMatrix 所需的坐标与时间编码；实际注入入口为 [`crate::HmDriver::perform_gesture`]。
+
 use crate::{DisplaySize, DriverError, Point, Position, Result};
 use std::time::Duration;
 use tracing::trace;
@@ -24,6 +30,9 @@ enum GestureStep {
 }
 
 /// 一根手指的自定义轨迹。
+///
+/// 每个步骤时长大于零且不超过 60 秒；非法时长返回 [`DriverError::InvalidGesture`]。
+/// 位置在注入前按照当前显示尺寸解析，移动与暂停按 [`Gesture::sample_interval`] 采样。
 #[derive(Clone, Debug)]
 pub struct GesturePath {
     steps: Vec<GestureStep>,
@@ -57,6 +66,20 @@ impl GesturePath {
 }
 
 /// 可同时包含多根手指轨迹的手势。
+///
+/// 默认采样间隔为 50 毫秒，注入速度为 `2000`。较短路径在终点补齐至最长路径；
+/// 编译后每根手指最多 10000 个点，超出范围返回 [`DriverError::InvalidGesture`]。
+/// 时间以整数毫秒编码，轨迹采样按间隔离散化。
+///
+/// ```
+/// use hm_driver_rs::{Gesture, GesturePath, Position};
+/// use std::time::Duration;
+/// let path = GesturePath::new(Position::normalized(0.2, 0.5)?, Duration::from_millis(100))?
+///     .move_to(Position::normalized(0.8, 0.5)?, Duration::from_millis(300))?
+///     .pause(Duration::from_millis(100))?;
+/// let gesture = Gesture::new(path).injection_speed(2000)?;
+/// # Ok::<(), hm_driver_rs::DriverError>(())
+/// ```
 #[derive(Clone, Debug)]
 pub struct Gesture {
     paths: Vec<GesturePath>,
@@ -76,6 +99,8 @@ impl Gesture {
     }
 
     /// 为手势添加一根新的手指轨迹，最多支持 10 根手指。
+    ///
+    /// 超过上限返回 [`DriverError::InvalidGesture`]。
     pub fn add_path(mut self, path: GesturePath) -> Result<Self> {
         trace!(target: "hm_driver_rs::gesture", total_paths = self.paths.len() + 1, "添加手指轨迹");
         if self.paths.len() >= MAX_FINGERS {
@@ -88,6 +113,8 @@ impl Gesture {
     }
 
     /// 设置手势轨迹的采样间隔（10～100 毫秒）。
+    ///
+    /// 按整数毫秒验证范围，超出范围返回 [`DriverError::InvalidGesture`]；默认 50 毫秒。
     pub fn sample_interval(mut self, interval: Duration) -> Result<Self> {
         let millis = interval.as_millis();
         if !(MIN_SAMPLE_MILLIS..=MAX_SAMPLE_MILLIS).contains(&millis) {
@@ -100,6 +127,8 @@ impl Gesture {
     }
 
     /// 设置手势注入速度（200～40000）。
+    ///
+    /// 超出范围返回 [`DriverError::InvalidGesture`]；默认 `2000`。
     pub fn injection_speed(mut self, speed: u32) -> Result<Self> {
         if !(200..=40_000).contains(&speed) {
             return Err(DriverError::InvalidGesture(

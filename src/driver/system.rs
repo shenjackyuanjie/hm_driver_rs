@@ -1,4 +1,8 @@
-//! Hypium 26 系统辅助能力：剪贴板、显示模式、时间时区、字体与网络模拟。
+//! 系统辅助能力：剪贴板、显示模式、时间时区、字体与网络模拟。
+//!
+//! 通过 HDC 探测并调用设备 `testhelper` / `netcopilot`，验证参数与命令回显。
+//! 字体操作管理临时文件，网络场景以设备 ID 显式启停/删除；工具、API Level、单位及
+//! 状态恢复流程在对应 [`HmDriver`] 方法中说明。
 
 use super::app::shell_quote;
 use super::{HmDriver, RemoteFileGuard, next_operation_id};
@@ -12,6 +16,8 @@ impl HmDriver {
     /// 设置系统界面为深色或浅色模式。
     ///
     /// 该能力依赖设备端 `testhelper`。
+    ///
+    /// 工具缺失返回 [`DriverError::Unsupported`]，输出无法识别返回 [`DriverError::Protocol`]。
     pub async fn set_view_mode(&self, mode: ViewMode) -> Result<()> {
         let output = self
             .run_testhelper(
@@ -32,6 +38,9 @@ impl HmDriver {
     /// 将系统时间设置为 `YYYY-MM-DD HH:MM:SS`。
     ///
     /// 该能力依赖设备端 `testhelper`，官方要求系统版本不低于 7.0.0。
+    ///
+    /// 去除两端空白并校验实际日期/时间，非法格式或日期返回 [`DriverError::InvalidArgument`]。
+    /// 运行时以 `testhelper` 探测和执行结果确认能力。
     pub async fn set_system_time(&self, value: &str) -> Result<()> {
         let value = value.trim();
         if !is_valid_system_time(value) {
@@ -48,6 +57,8 @@ impl HmDriver {
     /// 读取系统时间，返回 `YYYY-MM-DD HH:MM:SS`。
     ///
     /// 该能力依赖设备端 `testhelper`，官方要求系统版本不低于 7.0.0。
+    ///
+    /// 运行时探测 `testhelper`；响应不含可解析日期/时间时返回 [`DriverError::Protocol`]。
     pub async fn system_time(&self) -> Result<String> {
         let output = self.run_testhelper("get-time", "读取系统时间").await?;
         let value = prefixed_value(&output, "Current system time:")
@@ -62,6 +73,11 @@ impl HmDriver {
     /// 设置 IANA 时区，例如 `Asia/Shanghai` 或 `Etc/UTC`。
     ///
     /// 该能力依赖设备端 `testhelper`，官方要求系统版本不低于 7.0.0。
+    ///
+    /// 去除两端空白，空值或控制字符返回 [`DriverError::InvalidArgument`]，时区标识由设备工具解析。
+    ///
+    /// 工具缺失返回 [`DriverError::Unsupported`]，设备命令失败返回 HDC 错误，
+    /// 回显格式无法识别返回 [`DriverError::Protocol`]。
     pub async fn set_timezone(&self, timezone: &str) -> Result<()> {
         let timezone = validated_text_argument(timezone, "时区")?;
         let output = self
@@ -76,6 +92,11 @@ impl HmDriver {
     /// 读取当前 IANA 时区标识。
     ///
     /// 该能力依赖设备端 `testhelper`，官方要求系统版本不低于 7.0.0。
+    ///
+    /// 返回去除首尾空白的时区标识；输出无法识别返回 [`DriverError::Protocol`]。
+    ///
+    /// 工具缺失返回 [`DriverError::Unsupported`]，设备命令失败返回 HDC 错误，
+    /// 回显格式无法识别返回 [`DriverError::Protocol`]。
     pub async fn timezone(&self) -> Result<String> {
         let output = self.run_testhelper("get-timezone", "读取系统时区").await?;
         prefixed_value(&output, "Current timezone:")
@@ -87,6 +108,11 @@ impl HmDriver {
     /// 将文本写入系统剪贴板。
     ///
     /// 该能力依赖设备端 `testhelper`，官方要求系统版本不低于 7.0.0。
+    ///
+    /// 允许空字符串和多行文本，NUL 字符返回 [`DriverError::InvalidArgument`]。
+    ///
+    /// 工具缺失返回 [`DriverError::Unsupported`]，设备命令失败返回 HDC 错误，
+    /// 回显格式无法识别返回 [`DriverError::Protocol`]。
     pub async fn write_clipboard(&self, value: &str) -> Result<()> {
         if value.contains('\0') {
             return Err(DriverError::InvalidArgument(
@@ -105,6 +131,12 @@ impl HmDriver {
     /// 读取系统剪贴板文本；剪贴板为空时返回空字符串。
     ///
     /// 该能力依赖设备端 `testhelper`，官方要求系统版本不低于 7.0.0。
+    ///
+    /// 保留正文中的首尾空白和换行，仅去除工具前缀和一组输出末尾换行。
+    /// 输出格式无法识别返回 [`DriverError::Protocol`]。
+    ///
+    /// 工具缺失返回 [`DriverError::Unsupported`]，设备命令失败返回 HDC 错误，
+    /// 回显格式无法识别返回 [`DriverError::Protocol`]。
     pub async fn read_clipboard(&self) -> Result<String> {
         self.ensure_testhelper("读取系统剪贴板").await?;
         let output = self
@@ -120,6 +152,9 @@ impl HmDriver {
     /// 清空系统剪贴板。
     ///
     /// 该能力依赖设备端 `testhelper`，官方要求系统版本不低于 7.0.0。
+    ///
+    /// 工具缺失返回 [`DriverError::Unsupported`]，设备命令失败返回 HDC 错误，
+    /// 回显格式无法识别返回 [`DriverError::Protocol`]。
     pub async fn clear_clipboard(&self) -> Result<()> {
         let output = self
             .run_testhelper("clear-pastedata", "清空系统剪贴板")
@@ -130,6 +165,9 @@ impl HmDriver {
     /// 读取本地字体文件声明的字体名称。
     ///
     /// 文件会临时推送到设备，操作完成后会尽力清理。该能力依赖设备端 `testhelper`。
+    ///
+    /// 工具缺失返回 [`DriverError::Unsupported`]，设备命令失败返回 HDC 错误，
+    /// 回显格式无法识别返回 [`DriverError::Protocol`]。
     pub async fn font_name(&self, local: impl AsRef<Path>) -> Result<String> {
         let local = local.as_ref();
         let remote = remote_font_path(local);
@@ -155,6 +193,8 @@ impl HmDriver {
     /// 安装本地字体文件。
     ///
     /// 文件会临时推送到设备，操作完成后会尽力清理。重复安装同一字体视为成功。
+    ///
+    /// 使用设备端 `testhelper`，缺少工具返回 [`DriverError::Unsupported`]；传输/安装错误直接返回。
     pub async fn install_font(&self, local: impl AsRef<Path>) -> Result<()> {
         let local = local.as_ref();
         let remote = remote_font_path(local);
@@ -193,6 +233,12 @@ impl HmDriver {
     }
 
     /// 按字体名称卸载字体。
+    ///
+    /// `font_name` 是字体内部名称（可用 [`font_name`](Self::font_name) 读取），不是文件路径；
+    /// 名称去除两端空白，空值或控制字符返回 [`DriverError::InvalidArgument`]，依赖 `testhelper`。
+    ///
+    /// 工具缺失返回 [`DriverError::Unsupported`]，设备命令失败返回 HDC 错误，
+    /// 回显格式无法识别返回 [`DriverError::Protocol`]。
     pub async fn uninstall_font(&self, font_name: &str) -> Result<()> {
         let font_name = validated_text_argument(font_name, "字体名称")?;
         let output = self
@@ -210,24 +256,34 @@ impl HmDriver {
     }
 
     /// 启用设备端网络模拟工具。
+    ///
+    /// 需要 API Level 20 及设备端 `netcopilot`，能力不足返回 [`DriverError::Unsupported`]。
+    /// 系统设置和场景状态持续保留，由调用方显式停止场景及禁用模拟。
     pub async fn enable_network_simulation(&self) -> Result<()> {
         let output = self.run_netcopilot("-e 1", "启用网络模拟").await?;
         require_network_success("启用网络模拟", &output)
     }
 
     /// 禁用设备端网络模拟工具。
+    ///
+    /// API Level 和设备工具要求同 [`enable_network_simulation`](Self::enable_network_simulation)。
     pub async fn disable_network_simulation(&self) -> Result<()> {
         let output = self.run_netcopilot("-e 0", "禁用网络模拟").await?;
         require_network_success("禁用网络模拟", &output)
     }
 
     /// 列出设备端可用的网络模拟场景。
+    ///
+    /// 返回场景 ID 与名称；API Level 和工具要求同 [`enable_network_simulation`](Self::enable_network_simulation)。
     pub async fn network_scenarios(&self) -> Result<Vec<NetworkScenarioInfo>> {
         let output = self.run_netcopilot("-p", "查询网络模拟场景").await?;
         parse_network_scenarios(&output)
     }
 
     /// 启动已有网络模拟场景。
+    ///
+    /// `scenario_id` 须大于零，非法值返回 [`DriverError::InvalidArgument`]。先启用模拟再启动；
+    /// 切换场景时由调用方先停止原场景。API Level/工具要求见 [`enable_network_simulation`](Self::enable_network_simulation)。
     pub async fn start_network_scenario(&self, scenario_id: u32) -> Result<()> {
         validate_scenario_id(scenario_id)?;
         self.enable_network_simulation().await?;
@@ -238,6 +294,8 @@ impl HmDriver {
     }
 
     /// 启动官方内置网络模拟场景。
+    ///
+    /// 使用枚举指定的场景 ID，启用流程同 [`start_network_scenario`](Self::start_network_scenario)。
     pub async fn start_builtin_network_scenario(
         &self,
         scenario: BuiltinNetworkScenario,
@@ -249,6 +307,10 @@ impl HmDriver {
     ///
     /// 停止后如不再使用，应显式调用 [`delete_network_scenario`](Self::delete_network_scenario)
     /// 删除该自定义场景。
+    ///
+    /// 名称和丢包率按 [`NetworkScenario`] 校验；比较创建前后的场景 ID 定位新场景，
+    /// 调用方应串行修改场景列表。启动失败时尝试删除新配置并返回原错误。
+    /// API Level/工具要求见 [`enable_network_simulation`](Self::enable_network_simulation)。
     pub async fn start_custom_network_scenario(&self, scenario: &NetworkScenario) -> Result<u32> {
         scenario.validate()?;
         self.enable_network_simulation().await?;
@@ -297,6 +359,9 @@ impl HmDriver {
     }
 
     /// 停止指定网络模拟场景。
+    ///
+    /// ID 须大于零；先启用模拟再停止指定 ID，保留场景配置。API Level/工具要求见
+    /// [`enable_network_simulation`](Self::enable_network_simulation)。
     pub async fn stop_network_scenario(&self, scenario_id: u32) -> Result<()> {
         validate_scenario_id(scenario_id)?;
         self.enable_network_simulation().await?;
@@ -307,6 +372,9 @@ impl HmDriver {
     }
 
     /// 删除指定自定义网络模拟场景。
+    ///
+    /// ID 须大于零，内置或自定义的实际删除能力由设备工具判断；操作只删除配置。
+    /// API Level/工具要求见 [`enable_network_simulation`](Self::enable_network_simulation)。
     pub async fn delete_network_scenario(&self, scenario_id: u32) -> Result<()> {
         validate_scenario_id(scenario_id)?;
         let output = self

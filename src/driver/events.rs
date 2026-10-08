@@ -1,4 +1,7 @@
-//! Toast 与 UI 事件监听。
+//! Toast 与 UI 事件的一次性监听。
+//!
+//! 同一 [`HmDriver`] 会话的克隆共享单个未读取监听；先注册，再触发事件并读取结果。
+//! 读取采用设备等待时长和专用 RPC 超时，成功、超时、错误或取消后结束本地监听状态。
 
 use super::HmDriver;
 use crate::{DriverError, MatchPattern, Result, UiEvent, UiEventType};
@@ -35,6 +38,9 @@ impl HmDriver {
     ///
     /// 同一个 Driver 同时只允许一个尚未读取的监听。调用后应使用
     /// [`get_latest_ui_event`](Self::get_latest_ui_event) 读取结果。
+    ///
+    /// 克隆共享监听状态；重复开始返回 [`DriverError::InvalidArgument`]。应先开始监听，
+    /// 再触发预期事件并读取；开始失败或被取消时会释放本地监听状态。
     pub async fn start_listen_ui_event(&self, event_type: UiEventType) -> Result<()> {
         trace!(target: "hm_driver_rs::events", event_type = event_type.as_str(), "开始监听 UI 事件");
         self.inner
@@ -53,6 +59,8 @@ impl HmDriver {
     }
 
     /// 开始一次 Toast 监听。
+    ///
+    /// 与 [`start_listen_ui_event`](Self::start_listen_ui_event) 共享一次性监听状态。
     pub async fn start_listen_toast(&self) -> Result<()> {
         self.start_listen_ui_event(UiEventType::ToastShow).await
     }
@@ -61,6 +69,9 @@ impl HmDriver {
     ///
     /// 超时未捕获事件时返回 `None`。无论成功、超时、错误或调用被取消，本次监听状态
     /// 都会结束。
+    ///
+    /// 须先开始监听，`timeout` 大于零，非法调用返回 [`DriverError::InvalidArgument`]。
+    /// 设备等待参数向上取整到秒，主机 RPC 超时为 `timeout + 1 秒`，读取结果为一次事件。
     pub async fn get_latest_ui_event(&self, timeout: Duration) -> Result<Option<UiEvent>> {
         debug!(target: "hm_driver_rs::events", ?timeout, "读取 UI 事件");
         if !self.inner.ui_event_listening.load(Ordering::Acquire) {
@@ -88,6 +99,9 @@ impl HmDriver {
     }
 
     /// 等待并读取本次 Toast 监听捕获的文本。
+    ///
+    /// 须先 [`start_listen_toast`](Self::start_listen_toast)；没有事件或事件无文本返回 `None`。
+    /// 超时约束与监听生命周期同 [`get_latest_ui_event`](Self::get_latest_ui_event)。
     pub async fn get_latest_toast(&self, timeout: Duration) -> Result<Option<String>> {
         Ok(self
             .get_latest_ui_event(timeout)
@@ -96,6 +110,9 @@ impl HmDriver {
     }
 
     /// 等待 Toast 并按给定规则检查文本。
+    ///
+    /// 须先开始监听；`expected` 是实际匹配字符串/正则，`pattern` 只选择模式。
+    /// 无文本或未匹配返回 `false`，读取错误及非法正则错误直接返回。
     pub async fn check_toast(
         &self,
         expected: &str,

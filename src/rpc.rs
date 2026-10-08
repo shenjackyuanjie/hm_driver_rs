@@ -1,3 +1,10 @@
+//! Hypium JSON RPC 帧传输和 API 方言。
+//!
+//! [`ApiDialect`] 映射现代与旧版 Driver、Selector、Component 的类名。
+//! 内部客户端使用单连接串行请求，按换行组帧并检查帧大小及 request_id，兼容不带
+//! request_id 的 Agent 响应。在途超时、取消或连接失败会使传输失效；
+//! [`crate::HmDriver::recover`] 负责显式重建，调用方安排后续设备操作。
+
 use crate::{DriverError, Result};
 use serde::Deserialize;
 use serde_json::{Value, json};

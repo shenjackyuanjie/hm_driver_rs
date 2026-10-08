@@ -1,8 +1,17 @@
+//! 官方 Agent 资源清单。
+//!
+//! 从编译期 JSON 加载来源包、wheel 和五个 Agent 的版本、架构、传输及校验信息。
+//! [`AgentCatalog::load`] 核对来源与条目数量；设备版本分支选择由 [`crate::AgentResolver`]
+//! 负责，实际二进制校验在连接时执行。
+
 use crate::agent::AgentProfile;
 use crate::{DriverError, HYPIUM_ALIGNMENT_VERSION, Result};
 use serde::Deserialize;
 
-/// 随 crate 随带的官方 Agent 清单，可在不连接设备的情况下查阅已验证的 Agent 信息。
+/// 随 crate 分发的官方 Agent 清单，可在不连接设备的情况下查阅分支配置。
+///
+/// [`load`](Self::load) 检查来源和条目数量，二进制大小与哈希在连接物化时校验。
+/// 每个分支的本地验证状态由 [`AgentProfile::compatibility`] 记录。
 #[derive(Debug, Deserialize)]
 pub struct AgentCatalog {
     /// 官方来源包文件名。
@@ -17,6 +26,8 @@ impl AgentCatalog {
     /// 从编译期嵌入的 JSON 清单中加载官方 Agent catalog。
     ///
     /// 同时验证 source_package、source_wheel 以及 Agent 数量是否与预期一致。
+    ///
+    /// JSON 解析失败返回 [`DriverError::Json`]，来源或数量不符返回 [`DriverError::InvalidAgentCatalog`]。
     pub fn load() -> Result<Self> {
         let catalog: Self = serde_json::from_str(include_str!("../assets/agents.json"))?;
         if catalog.source_package != format!("devecotesting-hypium-{HYPIUM_ALIGNMENT_VERSION}.zip")
@@ -38,6 +49,8 @@ impl AgentCatalog {
     /// 根据版本号与架构在 catalog 中查找对应的 Agent 信息。
     ///
     /// 若未找到匹配项则返回 `DriverError::InvalidAgentCatalog`。
+    ///
+    /// 版本与架构按清单字符串精确匹配，返回配置的克隆；设备版本分支选择使用 [`crate::AgentResolver`]。
     pub fn profile(&self, version: &str, architecture: &str) -> Result<AgentProfile> {
         self.agents
             .iter()

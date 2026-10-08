@@ -1,3 +1,9 @@
+//! 官方 Agent 分支解析与动态库物化。
+//!
+//! 根据设备架构和 UITest 四段版本选择 [`AgentProfile`]，由 [`AgentSource`] 指定
+//! 内嵌资源或外部目录。连接前核验大小及 SHA-256，内嵌资源按哈希写入主机缓存。
+//! 分支来源和本地验证状态由 [`crate::AgentCatalog`] 统一记录。
+
 use crate::catalog::AgentCatalog;
 use crate::{DriverError, Result};
 #[cfg(feature = "embedded-agents")]
@@ -16,7 +22,7 @@ use tracing::{debug, info, trace, warn};
 pub enum HarmonyTransport {
     /// TCP 转发，连接设备上指定端口的 Agent。
     Tcp {
-        /// 本地转发端口号。
+        /// 设备端 Agent 监听的 TCP 端口号。
         remote_port: u16,
     },
     /// 本地抽象套接字转发。
@@ -60,9 +66,13 @@ pub struct AgentProfile {
 }
 
 /// Agent 二进制的来源。
+///
+/// 连接时按照 [`AgentProfile`] 校验文件名对应的大小和 SHA-256；
+/// `Directory` 在关闭 `embedded-agents` 时仍可使用。
 #[derive(Clone, Debug, Default)]
 pub enum AgentSource {
-    /// 使用编译进 crate 的官方 Agent。
+    /// 使用编译进 crate 的官方 Agent；需要 `embedded-agents` feature，连接时写入主机缓存。
+    /// 关闭此 feature 后选择该来源，连接返回 [`DriverError::Unsupported`]。
     #[default]
     Embedded,
     /// 从指定目录读取与 catalog 同名的官方 Agent。
@@ -102,6 +112,8 @@ pub struct AgentResolver {
 
 impl AgentResolver {
     /// 加载官方 Agent catalog 并构造一个新的解析器。
+    ///
+    /// 清单解析或来源一致性检查失败时返回 JSON 或 catalog 错误。
     pub fn new() -> Result<Self> {
         Ok(Self {
             catalog: AgentCatalog::load()?,
@@ -112,6 +124,17 @@ impl AgentResolver {
     ///
     /// `architecture` 会被标准化为 `x86_64` 或 `arm64`；
     /// `version` 需符合 `X.Y.Z.W` 四段式版本号格式。
+    ///
+    /// 该方法只解析配置，不读取或部署二进制。未知架构返回
+    /// [`DriverError::UnsupportedArchitecture`]，非法版本返回 [`DriverError::InvalidUitestVersion`]。
+    /// `x86_64` 使用 `1.1.12`；ARM64 根据四段版本边界选择 `1.1.3`、`1.1.5`、`1.1.12` 或 `1.2.3`。
+    ///
+    /// ```
+    /// use hm_driver_rs::AgentResolver;
+    /// let profile = AgentResolver::new()?.resolve("aarch64", "6.0.2.2")?;
+    /// assert_eq!(profile.version, "1.2.3");
+    /// # Ok::<(), hm_driver_rs::DriverError>(())
+    /// ```
     pub fn resolve(&self, architecture: &str, version: &str) -> Result<AgentProfile> {
         let architecture = normalize_architecture(architecture)?;
         let version = version.parse::<UitestVersion>()?;

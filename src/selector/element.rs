@@ -1,4 +1,8 @@
 //! 通过选择器定位到的远端 UI 控件句柄。
+//!
+//! [`Element`] 保存选择器、匹配索引和会话代际，通过 RPC 读取属性并执行控件动作。
+//! 恢复后重新定位远端引用，释放时进入 Driver 清理队列；[`ElementInfo`] 汇总顺序读取
+//! 的类型化属性，属性集合单次读取由 [`Element::all_properties`] 提供。
 
 use super::Selector;
 use crate::driver::HmDriver;
@@ -16,6 +20,13 @@ struct ElementState {
 }
 
 /// 已定位的远端 UI 控件。
+///
+/// 属性和操作通过 RPC 读取/执行，返回值反映调用时的设备状态。Driver 恢复成功后，
+/// 下一次操作按原 [`Selector`] 和匹配索引重新定位，未找到返回 [`DriverError::ElementNotFound`]。
+/// 句柄释放时将远端引用排入 Driver 的批量清理队列。
+///
+/// 类型化属性响应不符合预期时返回 [`DriverError::Protocol`]；通信和设备异常原样返回。
+/// 本地快照查询请使用 [`crate::UiNode`] 或 [`crate::XPathElement`]。
 pub struct Element {
     driver: HmDriver,
     selector: Selector,
@@ -23,7 +34,7 @@ pub struct Element {
     state: Mutex<ElementState>,
 }
 
-/// 一次性读取的完整控件属性。
+/// 通过 [`Element::info`] 顺序读取形成的类型化控件属性集合。
 #[derive(Clone, Debug, PartialEq)]
 pub struct ElementInfo {
     /// 控件的资源 ID。
@@ -133,6 +144,9 @@ impl Element {
     /// 支持的属性名包括 `id`、`key`、`type`、`text`、`description`、`hint`、
     /// `selected`、`checked`、`enabled`、`focused`、`checkable`、`clickable`、
     /// `longClickable`、`scrollable`、`originalText`。
+    ///
+    /// `id` 与 `key` 均调用 `getId`；其他名称返回 [`DriverError::Unsupported`]。
+    /// `originalText` 的版本选择见 [`original_text`](Self::original_text)。
     pub async fn attribute(&self, name: &str) -> Result<Value> {
         if name == "originalText" {
             return self.original_text().await.map(Value::String);
@@ -157,6 +171,9 @@ impl Element {
     }
 
     /// 一次 RPC 读取控件公开的全部属性。
+    ///
+    /// API Level 12 及以上可用，已知较低版本返回 [`DriverError::Unsupported`]。
+    /// 返回原始 JSON 属性值，保留设备扩展字段；非对象响应返回 [`DriverError::Protocol`]。
     pub async fn all_properties(&self) -> Result<BTreeMap<String, Value>> {
         if let Some(level) = self.driver.api_level().await?
             && level < 12
@@ -176,6 +193,10 @@ impl Element {
     }
 
     /// 读取控件未经展示层转换的原始文本。
+    ///
+    /// API Level 20 及以上使用 `getOriginalText`，12–19 使用 `getAllProperties`，
+    /// 已知更低版本返回 [`DriverError::Unsupported`]。版本未知时先尝试直接方法，
+    /// 仅在方法不存在时回退属性集合；原始字段缺失返回 `Unsupported`。
     pub async fn original_text(&self) -> Result<String> {
         match self.driver.api_level().await? {
             Some(20..) => value_string(
@@ -292,6 +313,8 @@ impl Element {
     /// `(0, 0)` 为左上角，`(0.5, 0.5)` 为中心，`(1, 1)` 为右下角。
     /// 与官方 Hypium 一致，大于 `1` 的值按像素偏移计算，负数按控件尺寸比例计算，
     /// 因而也可指定控件外的位置。
+    ///
+    /// 偏移须为有限数，否则返回 [`DriverError::InvalidCoordinate`]；像素结果四舍五入。
     pub async fn point_at(&self, offset_x: f64, offset_y: f64) -> Result<crate::Point> {
         if !offset_x.is_finite() || !offset_y.is_finite() {
             return Err(DriverError::InvalidCoordinate(
@@ -316,6 +339,8 @@ impl Element {
     }
 
     /// 点击控件内（或控件外）的相对偏移位置。
+    ///
+    /// 偏移换算及错误见 [`point_at`](Self::point_at)，然后调用坐标点击。
     pub async fn click_at(&self, offset_x: f64, offset_y: f64) -> Result<()> {
         self.driver
             .click(self.point_at(offset_x, offset_y).await?)
@@ -323,6 +348,8 @@ impl Element {
     }
 
     /// 双击控件内（或控件外）的相对偏移位置。
+    ///
+    /// 偏移换算及错误见 [`point_at`](Self::point_at)，然后调用坐标双击。
     pub async fn double_click_at(&self, offset_x: f64, offset_y: f64) -> Result<()> {
         self.driver
             .double_click(self.point_at(offset_x, offset_y).await?)
@@ -330,6 +357,8 @@ impl Element {
     }
 
     /// 长按控件内（或控件外）的相对偏移位置。
+    ///
+    /// 偏移换算及错误见 [`point_at`](Self::point_at)，然后调用坐标长按。
     pub async fn long_click_at(&self, offset_x: f64, offset_y: f64) -> Result<()> {
         self.driver
             .long_click(self.point_at(offset_x, offset_y).await?)
@@ -337,6 +366,8 @@ impl Element {
     }
 
     /// 在控件中心长按给定时长。
+    ///
+    /// 时长、设备命令及错误见 [`HmDriver::long_click_for`]。
     pub async fn long_click_for(&self, duration: Duration) -> Result<()> {
         self.driver
             .long_click_for(self.bounds_center().await?, duration)
@@ -344,6 +375,8 @@ impl Element {
     }
 
     /// 在控件内（或控件外）的相对偏移位置长按给定时长。
+    ///
+    /// 偏移换算见 [`point_at`](Self::point_at)，时长约束见 [`HmDriver::long_click_for`]。
     pub async fn long_click_at_for(
         &self,
         offset_x: f64,
@@ -356,6 +389,8 @@ impl Element {
     }
 
     /// 在控件中心执行单次或双次指关节敲击。
+    ///
+    /// `times` 为 `1` 或 `2`，需要 API Level 22；约束见 [`HmDriver::knuckle_knock`]。
     pub async fn knuckle_knock(&self, times: u8) -> Result<()> {
         self.driver
             .knuckle_knock(&[self.bounds_center().await?], times)
@@ -363,16 +398,18 @@ impl Element {
     }
 
     /// 以控件中心执行指关节闭合圈选。
+    ///
+    /// 半径、速度及 API Level 要求见 [`HmDriver::knuckle_select`]。
     pub async fn knuckle_select(&self, radius: u32, speed: u32) -> Result<()> {
         self.driver
             .knuckle_select(self.bounds_center().await?, radius, speed)
             .await
     }
 
-    /// 一次性读取控件的全部属性。
+    /// 依次读取控件属性并汇总为 [`ElementInfo`]。
     ///
-    /// 与逐个调用属性方法相比，此方法在一次往返中获取所有信息，
-    /// 但在默认实现中仍然是通过多次 API 调用完成的。
+    /// 顺序调用六个字符串属性、八个布尔属性及 bounds，共 15 次属性 RPC，中心由 bounds
+    /// 计算；这些值对应各次读取时刻。需要一次属性 RPC 时使用 [`all_properties`](Self::all_properties)。
     pub async fn info(&self) -> Result<ElementInfo> {
         debug!(target: "hm_driver_rs::element", "获取元素完整信息");
         let id = self.id().await?;
@@ -438,7 +475,7 @@ impl Element {
         self.operate("clearText", json!([])).await.map(|_| ())
     }
 
-    /// 使用平台默认速度滚动到控件顶部。
+    /// 以速度 `600` 滚动到控件顶部。
     pub async fn scroll_to_top(&self) -> Result<()> {
         self.scroll_to_top_with_speed(600).await
     }
@@ -446,6 +483,7 @@ impl Element {
     /// 以指定速度滚动到控件顶部。
     ///
     /// `speed` 取值范围为 200 到 40000。
+    /// 超出范围返回 [`DriverError::InvalidArgument`]。
     pub async fn scroll_to_top_with_speed(&self, speed: u32) -> Result<()> {
         validate_operation_speed(speed)?;
         self.operate("scrollToTop", json!([speed]))
@@ -453,7 +491,7 @@ impl Element {
             .map(|_| ())
     }
 
-    /// 使用平台默认速度滚动到控件底部。
+    /// 以速度 `600` 滚动到控件底部。
     pub async fn scroll_to_bottom(&self) -> Result<()> {
         self.scroll_to_bottom_with_speed(600).await
     }
@@ -461,6 +499,7 @@ impl Element {
     /// 以指定速度滚动到控件底部。
     ///
     /// `speed` 取值范围为 200 到 40000。
+    /// 超出范围返回 [`DriverError::InvalidArgument`]。
     pub async fn scroll_to_bottom_with_speed(&self, speed: u32) -> Result<()> {
         validate_operation_speed(speed)?;
         self.operate("scrollToBottom", json!([speed]))
@@ -469,11 +508,17 @@ impl Element {
     }
 
     /// 在当前可滚动控件中查找目标控件。
+    ///
+    /// 使用 Agent 默认滚动选项；未找到返回 `None`。显式方向和边缘偏移使用
+    /// [`scroll_search_with_options`](Self::scroll_search_with_options)。
     pub async fn scroll_search(&self, selector: &Selector) -> Result<Option<Element>> {
         self.scroll_search_raw(selector, json!([])).await
     }
 
     /// 指定滚动方向及可选边缘偏移后查找目标控件。
+    ///
+    /// `vertical=true` 为纵向、`false` 为横向；`offset` 为可选像素偏移。
+    /// 未找到返回 `None`，查询或滚动异常直接返回。
     pub async fn scroll_search_with_options(
         &self,
         selector: &Selector,
@@ -516,6 +561,8 @@ impl Element {
     }
 
     /// 将当前控件拖拽到目标控件位置。
+    ///
+    /// 目标应由同一 Driver 会话定位，操作使用两端的远端引用。
     pub async fn drag_to(&self, target: &Element) -> Result<()> {
         let target = target.reference().await?;
         self.operate("dragTo", json!([target])).await.map(|_| ())
@@ -524,6 +571,8 @@ impl Element {
     /// 在控件上执行捏合缩小手势。
     ///
     /// `scale` 为缩放比例，必须大于 0。
+    ///
+    /// 比例还须为有限数，非法值返回 [`DriverError::InvalidCoordinate`]。
     pub async fn pinch_in(&self, scale: f64) -> Result<()> {
         validate_scale(scale)?;
         self.operate("pinchIn", json!([scale])).await.map(|_| ())
@@ -532,6 +581,8 @@ impl Element {
     /// 在控件上执行捏合放大手势。
     ///
     /// `scale` 为缩放比例，必须大于 0。
+    ///
+    /// 比例还须为有限数，非法值返回 [`DriverError::InvalidCoordinate`]。
     pub async fn pinch_out(&self, scale: f64) -> Result<()> {
         validate_scale(scale)?;
         self.operate("pinchOut", json!([scale])).await.map(|_| ())
@@ -541,6 +592,8 @@ impl Element {
     ///
     /// 在指定超时时间内不断尝试查找控件，若控件已不存在则返回 `true`，
     /// 超时后仍未消失则返回 `false`。
+    ///
+    /// 每 100 毫秒按保存的选择器重新查找，总截止时间约束单次查找；其他查找错误直接返回。
     pub async fn wait_until_gone(&self, timeout: Duration) -> Result<bool> {
         debug!(target: "hm_driver_rs::element", ?timeout, "等待元素消失");
         let deadline = Instant::now() + timeout;
@@ -564,6 +617,9 @@ impl Element {
     }
 
     /// 等待控件属性变为指定值，超时返回 `false`。
+    ///
+    /// 每 100 毫秒读取一次，按 JSON 值相等比较（区分字符串、布尔和数值）。
+    /// 总截止时间约束单次读取，零超时返回 `false`，读取错误直接返回。
     pub async fn wait_for_attribute(
         &self,
         name: &str,

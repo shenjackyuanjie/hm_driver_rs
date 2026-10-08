@@ -1,4 +1,8 @@
 //! HDC 进程封装：配置、进程执行核心与设备/传输/端口转发命令。
+//!
+//! [`HdcConfig`] 定义路径、服务地址及分类超时，内部执行器通过参数数组启动进程，
+//! 完成超时控制、失败标记检查和设备标识脱敏，返回 [`CommandOutput`]。
+//! 子模块分别负责命令构造和输出解析，Driver 复用已绑定目标设备的执行器。
 
 mod commands;
 mod parse;
@@ -14,15 +18,19 @@ use tokio::time::timeout;
 use tracing::{debug, warn};
 
 /// HDC 进程配置。
+///
+/// 路径优先级：显式设置 → `HDC_PATH` → `PATH`；发现或连接时固定为绝对路径。
+/// 服务地址优先使用显式设置，否则读取成对的 `HDC_SERVER_HOST` / `HDC_SERVER_PORT`。
+/// 只设置一个服务环境变量时交由 HDC 自身解释，全部未设置时使用默认服务。
 #[derive(Clone, Debug)]
 pub struct HdcConfig {
     pub(crate) path: Option<PathBuf>,
     pub(crate) server: Option<(String, u16)>,
-    /// 命令执行的超时时间。
+    /// 单次普通 HDC 命令的超时时间，默认 10 秒。
     pub command_timeout: Duration,
-    /// 文件传输操作的超时时间。
+    /// 单次文件传输及应用安装/卸载的超时时间，默认 60 秒。
     pub transfer_timeout: Duration,
-    /// 与 HDC agent 通信的超时时间。
+    /// singleness daemon 启动命令及启动检查的超时时间，默认 10 秒。
     pub agent_timeout: Duration,
 }
 
@@ -46,19 +54,24 @@ impl HdcConfig {
     }
 
     /// 设置 HDC server 地址。
+    ///
+    /// 发现或连接时验证地址和端口；主机名须非空，端口须大于零，
+    /// 非法值返回 [`DriverError::InvalidIdentifier`]。
     pub fn with_server(mut self, host: impl Into<String>, port: u16) -> Self {
         self.server = Some((host.into(), port));
         self
     }
 
-    /// 读取已配置的 HDC 可执行文件路径（未显式设置时为 `None`，将在
-    /// `HdcRunner::new` 时从 `HDC_PATH`/`PATH` 自动推导）。
+    /// 读取显式配置的 HDC 路径；未设置时为 `None`。
+    ///
+    /// 环境变量和 `PATH` 在设备发现/连接时解析，不写回本配置。
     pub fn path(&self) -> Option<&std::path::Path> {
         self.path.as_deref()
     }
 
-    /// 读取已配置的 HDC server 地址（未显式设置时为 `None`，将在
-    /// `HdcRunner::new` 时从 `HDC_SERVER_HOST`/`HDC_SERVER_PORT` 自动推导）。
+    /// 读取显式配置的 HDC 服务地址；未设置时为 `None`。
+    ///
+    /// `HDC_SERVER_HOST` / `HDC_SERVER_PORT` 在设备发现/连接时解析。
     pub fn server(&self) -> Option<(&str, u16)> {
         self.server
             .as_ref()
@@ -67,6 +80,9 @@ impl HdcConfig {
 }
 
 /// HDC 命令的成功输出。
+///
+/// 标准输出和错误输出按 UTF-8 有损解码，并将当前设备序列号替换为脱敏值。
+/// 非零退出码或识别到 HDC 失败标记时，命令入口返回 [`DriverError::HdcCommand`]。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommandOutput {
     /// 命令的标准输出。

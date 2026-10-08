@@ -1,4 +1,7 @@
 //! 设备信息、显示与电源状态相关能力。
+//!
+//! 显示尺寸和旋转通过 Hypium RPC 获取/设置，系统参数、网络接口与电源状态通过 HDC 读取。
+//! 点亮、条件熄屏及上滑使用设备输入命令或 RPC；电源状态和锁屏状态分别记录在 API 说明中。
 
 use super::HmDriver;
 use crate::keycode::KeyCode;
@@ -19,6 +22,8 @@ impl HmDriver {
     /// 获取指定显示设备的尺寸（宽度 x 高度，单位为像素）。
     ///
     /// `display_id` 必须大于 0；该能力需要 API Level 18 及以上。
+    ///
+    /// ID 为零返回 [`DriverError::InvalidArgument`]，已知 API Level 不足返回 [`DriverError::Unsupported`]。
     pub async fn display_size_for(&self, display_id: u32) -> Result<DisplaySize> {
         if display_id == 0 {
             return Err(DriverError::InvalidArgument(
@@ -52,6 +57,9 @@ impl HmDriver {
     }
 
     /// 收集完整的设备信息（型号、系统版本、CPU ABI、WLAN IP、显示尺寸与旋转角度等）。
+    ///
+    /// 逐项读取；设备参数读取失败时字符串为空、API 版本为 `None`。
+    /// WLAN、显示尺寸和旋转查询错误直接返回。
     pub async fn device_info(&self) -> Result<DeviceInfo> {
         debug!(target: "hm_driver_rs::device", "收集设备信息");
         let product_name = self
@@ -99,6 +107,8 @@ impl HmDriver {
     }
 
     /// 熄灭屏幕。仅在屏幕当前为亮屏状态时发送电源键。
+    ///
+    /// 已 Sleep/Inactive 时直接成功，未知电源状态返回 [`DriverError::Protocol`]。
     pub async fn screen_off(&self) -> Result<()> {
         debug!(target: "hm_driver_rs::device", "熄灭屏幕");
         if should_toggle_for_screen_off(&self.screen_state().await?)? {
@@ -114,6 +124,9 @@ impl HmDriver {
     }
 
     /// 获取当前屏幕电源状态（Awake / Sleep / Inactive）。
+    ///
+    /// 从 PowerManagerService 读取；未识别的状态保存在 [`ScreenState::Unknown`]，
+    /// 输出缺少状态字段返回 [`DriverError::Protocol`]。锁屏状态查询列入 crate 文档的待补功能。
     pub async fn screen_state(&self) -> Result<ScreenState> {
         let output = self
             .inner
@@ -124,6 +137,8 @@ impl HmDriver {
     }
 
     /// 获取 WLAN 接口的非回环 IPv4/IPv6 地址。
+    ///
+    /// 优先 WLAN/Wi-Fi 接口，随后回退到其他接口；没有非回环、非未指定地址时返回 `None`。
     pub async fn wlan_ip(&self) -> Result<Option<IpAddr>> {
         trace!(target: "hm_driver_rs::device", "获取 WLAN IP");
         let output = self.inner.hdc.shell("ifconfig").await?;
@@ -131,6 +146,8 @@ impl HmDriver {
     }
 
     /// 解锁屏幕：先亮屏，再从底部向上滑动。
+    ///
+    /// 执行亮屏与上滑操作；密码/PIN 等解锁流程由调用方组织。
     pub async fn unlock(&self) -> Result<()> {
         debug!(target: "hm_driver_rs::device", "解锁屏幕");
         self.screen_on().await?;

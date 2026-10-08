@@ -1,4 +1,8 @@
 //! 远端 HarmonyOS 窗口句柄。
+//!
+//! [`UiWindow`] 通过 RPC 读取属性并执行聚焦、移动、缩放和显示模式操作。
+//! 句柄保存定位条件与会话代际，恢复后按原过滤器重新定位，释放时将远端引用
+//! 排入 Driver 清理队列。定位入口为 [`HmDriver::find_window`]。
 
 use crate::driver::HmDriver;
 use crate::{Bounds, DriverError, ResizeDirection, Result, WindowFilter, WindowMode};
@@ -13,7 +17,10 @@ struct WindowState {
 
 /// 通过 [`HmDriver::find_window`] 定位到的远端窗口。
 ///
-/// Driver 恢复会话后，窗口会使用原始 [`WindowFilter`] 自动重新定位。
+/// Driver 恢复成功后，窗口在下一次调用时使用原始 [`WindowFilter`] 重新定位，
+/// 未找到返回 [`DriverError::WindowNotFound`]。属性和动作均发送 RPC；设备响应
+/// 类型错误返回 [`DriverError::Protocol`]，其他通信或 Hypium 错误原样返回。
+/// 释放句柄时将远端引用排入 Driver 清理队列。
 pub struct UiWindow {
     driver: HmDriver,
     filter: WindowFilter,
@@ -88,6 +95,8 @@ impl UiWindow {
     }
 
     /// 获取窗口边界。
+    ///
+    /// 返回屏幕绝对像素边界，响应格式或边界错误返回 [`DriverError::Protocol`]。
     pub async fn bounds(&self) -> Result<Bounds> {
         let value = self.operate("getBounds", json!([])).await?;
         Bounds::parse_value(&value)
@@ -100,6 +109,8 @@ impl UiWindow {
     }
 
     /// 获取窗口显示模式。
+    ///
+    /// 未知模式或非整数响应返回 [`DriverError::Protocol`]。
     pub async fn mode(&self) -> Result<WindowMode> {
         let value = self.operate("getWindowMode", json!([])).await?;
         let raw = value
@@ -115,6 +126,8 @@ impl UiWindow {
     }
 
     /// 判断窗口是否处于活动状态。
+    ///
+    /// 先尝试 `isActived`，仅在方法不存在时回退 `isActive`。
     pub async fn is_active(&self) -> Result<bool> {
         let value = match self.operate("isActived", json!([])).await {
             Ok(value) => value,
@@ -132,11 +145,16 @@ impl UiWindow {
     }
 
     /// 将窗口左上角移动到指定坐标。
+    ///
+    /// `x`、`y` 为屏幕绝对像素坐标，设备窗口管理器决定允许的位置。
     pub async fn move_to(&self, x: i32, y: i32) -> Result<()> {
         self.operate("moveTo", json!([x, y])).await.map(|_| ())
     }
 
     /// 调整窗口大小。
+    ///
+    /// `width`、`height` 为目标像素尺寸且须大于零，非法值返回 [`DriverError::InvalidArgument`]；
+    /// `direction` 选择调整的边缘或角点，设备决定窗口支持的调整方式。
     pub async fn resize(&self, width: u32, height: u32, direction: ResizeDirection) -> Result<()> {
         if width == 0 || height == 0 {
             return Err(DriverError::InvalidArgument(
@@ -149,6 +167,8 @@ impl UiWindow {
     }
 
     /// 切换到分屏模式。
+    ///
+    /// 设备窗口管理器决定该窗口能否切换，失败返回 Hypium 错误。
     pub async fn split(&self) -> Result<()> {
         self.operate("split", json!([])).await.map(|_| ())
     }
@@ -169,6 +189,8 @@ impl UiWindow {
     }
 
     /// 关闭窗口。
+    ///
+    /// 关闭设备上的窗口，与关闭 Driver 会话不同。
     pub async fn close(&self) -> Result<()> {
         self.operate("close", json!([])).await.map(|_| ())
     }

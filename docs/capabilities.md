@@ -174,6 +174,10 @@ UI 树节点支持属性读取、bounds 解析、深度优先 `find()` 和 `find
 Selector 链、未选中的控件引用和滚动搜索产生的临时引用会分批释放，避免长时间轮询
 耗尽 Agent 端对象。
 
+`find()` 和 `exists()` 遵循 Selector 的匹配列表索引（默认 `0`）；`find_all()` 和
+`count()` 保留全部匹配。`info()` 顺序执行 15 次属性 RPC，汇总为类型化属性集合；
+一次属性 RPC 使用 `all_properties()`。
+
 `all_properties()` 需要 API Level 12 及以上。`original_text()` 在 API Level 20 及以上
 调用 `Component.getOriginalText`，API Level 12 到 19 从 `Component.getAllProperties`
 读取；低于 12 返回 `DriverError::Unsupported`。API Level 未知时会按这个顺序做能力探测，
@@ -189,6 +193,9 @@ Selector 链、未选中的控件引用和滚动搜索产生的临时引用会�
 - 点击、双击、长按和输入文本。
 
 XPath 查询先抓取 UI 树，再在主机端构造 XML 并执行。
+表达式须返回节点集合，标量结果或语法错误返回 `InvalidXPath`。
+`XPathElement::exists()` 检查快照是否含有效 bounds，设备当前存在性使用
+`HmDriver::xpath_exists()`；页面变化后重新查询可取得当前属性和坐标。
 
 ## Toast、UI 事件和窗口
 

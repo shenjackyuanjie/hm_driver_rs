@@ -1,3 +1,9 @@
+//! 设备、坐标、应用、输入、窗口与系统辅助的公共数据类型。
+//!
+//! [`DeviceSerial`] 封装敏感设备标识，[`AppIdentifier`] 校验设备命令中的应用标识。
+//! [`Position`] 接受绝对像素或归一化位置，[`Bounds`] 解析布局边界；其余枚举与结构
+//! 为 Driver API 提供状态、操作选项和返回值。各类型的方法说明定义单位、取值范围与转换规则。
+
 use crate::{DriverError, Result};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
@@ -76,7 +82,7 @@ pub struct DeviceDescriptor {
     pub details: Vec<String>,
 }
 
-/// 屏幕绝对坐标。
+/// 屏幕绝对像素坐标，原点为显示区域左上角，向右/下为正方向。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Point {
     /// 横坐标。
@@ -102,7 +108,7 @@ pub struct NormalizedPoint {
 }
 
 impl NormalizedPoint {
-    /// 创建一个归一化坐标点，坐标值必须在 0 到 1 之间。
+    /// 创建一个归一化坐标点，坐标值须为有限数且在 `0.0..=1.0` 内，否则返回 [`DriverError::InvalidCoordinate`]。
     pub fn new(x: f64, y: f64) -> Result<Self> {
         if x.is_finite() && y.is_finite() && (0.0..=1.0).contains(&x) && (0.0..=1.0).contains(&y) {
             Ok(Self { x, y })
@@ -113,7 +119,11 @@ impl NormalizedPoint {
         }
     }
 
-    /// 按显示区域换算为有效的绝对像素坐标。
+    /// 按显示区域换算为绝对像素坐标，四舍五入到整数。
+    ///
+    /// `0` 对应首个像素，`1` 对应 `width - 1` / `height - 1`；显示尺寸须非零，
+    /// 最大像素坐标须能放入 `i32`，否则返回 [`DriverError::InvalidCoordinate`]。
+    /// 坐标范围由 [`new`](Self::new) 验证；直接修改公开字段后应维持该范围。
     pub fn resolve(self, display: DisplaySize) -> Result<Point> {
         let max_x = display
             .width
@@ -154,7 +164,7 @@ impl Position {
         NormalizedPoint::new(x, y).map(Self::Normalized)
     }
 
-    /// 按显示区域解析绝对或归一化坐标。
+    /// 绝对坐标原样返回，归一化坐标按 [`NormalizedPoint::resolve`] 换算。
     pub fn resolve(self, display: DisplaySize) -> Result<Point> {
         match self {
             Self::Absolute(point) => Ok(point),
@@ -209,8 +219,10 @@ impl Bounds {
         self.bottom - self.top
     }
 
-    /// 解析官方 `uitest` 常见的 bounds JSON 形式：
-    /// `{"left":..,"top":..,"right":..,"bottom":..}` 或 `[left, top, right, bottom]`。
+    /// 解析 bounds 对象、四整数数组或 [`parse_text`](Self::parse_text) 支持的字符串。
+    ///
+    /// 对象字段为 `left`、`top`、`right`、`bottom`；整数须可表示为 `i32`。
+    /// 字段/格式错误或右/下边界小于左/上边界时返回 `None`。
     pub fn parse_value(value: &serde_json::Value) -> Option<Bounds> {
         match value {
             serde_json::Value::Object(object) => {
@@ -387,6 +399,10 @@ impl BuiltinNetworkScenario {
 }
 
 /// 自定义网络模拟场景参数。
+///
+/// [`new`](Self::new) 及场景启动时校验：名称非空且无控制字符，丢包率为有限数，
+/// 范围 `0.0..=1.0`；非法值返回 [`DriverError::InvalidArgument`]。
+/// 带宽/延迟以给定整数传递给设备工具。
 #[derive(Clone, Debug, PartialEq)]
 pub struct NetworkScenario {
     /// 场景名称。
@@ -474,9 +490,9 @@ pub enum ScreenshotMethod {
     /// 优先使用 snapshot_display，失败时回退到 UITest screenCap。
     #[default]
     Auto,
-    /// 使用 snapshot display 截图。
+    /// 使用 `snapshot_display` 截图，返回 JPEG 字节。
     SnapshotDisplay,
-    /// 使用 UITest screenCap 截图。
+    /// 使用 `uitest screenCap` 截图，返回 PNG 字节。
     ScreenCap,
 }
 
@@ -595,17 +611,25 @@ impl TryFrom<i64> for WindowMode {
     }
 }
 
-/// 调整窗口大小时使用的方向。
+/// 调整窗口大小时选择的边缘或角点，传给 [`crate::UiWindow::resize`]。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ResizeDirection {
+    /// 从左边缘调整。
     Left = 0,
+    /// 从右边缘调整。
     Right = 1,
+    /// 从上边缘调整。
     Up = 2,
+    /// 从下边缘调整。
     Down = 3,
+    /// 从左上角调整。
     LeftUp = 4,
+    /// 从左下角调整。
     LeftDown = 5,
+    /// 从右上角调整。
     RightUp = 6,
+    /// 从右下角调整。
     RightDown = 7,
 }
 
@@ -616,6 +640,9 @@ impl ResizeDirection {
 }
 
 /// 用于查找窗口的组合条件。
+///
+/// 各条件同时生效，重复设置同一字段以最后一次为准。
+/// [`crate::HmDriver::find_window`] 要求至少一个条件。
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WindowFilter {
@@ -686,6 +713,9 @@ pub enum SwipeArea {
 
 impl SwipeArea {
     /// 使用归一化坐标创建一个方向滑动区域。
+    ///
+    /// 所有坐标须为有限数且在 `0.0..=1.0` 内，右/下边界须大于左/上边界，
+    /// 否则返回 [`DriverError::InvalidCoordinate`]。
     pub fn normalized(left: f64, top: f64, right: f64, bottom: f64) -> Result<Self> {
         let top_left = NormalizedPoint::new(left, top)?;
         let bottom_right = NormalizedPoint::new(right, bottom)?;
@@ -756,7 +786,10 @@ pub struct AbilityInfo {
 pub struct AppIdentifier(String);
 
 impl AppIdentifier {
-    /// 创建一个新的应用标识符，同时校验是否满足 HarmonyOS 标识符规则。
+    /// 校验并包装用于设备命令的应用标识符。
+    ///
+    /// 总长度为 1–255 字节，点分段长度为 1–127 字节，每段以 ASCII 字母或下划线
+    /// 开始，其余为 ASCII 字母、数字或下划线；非法值返回 [`DriverError::InvalidIdentifier`]。
     pub fn new(value: impl Into<String>) -> Result<Self> {
         let value = value.into();
         if is_valid_identifier(&value) {
@@ -773,7 +806,7 @@ impl AppIdentifier {
 }
 
 /// 校验 Ability 类名是否符合 HarmonyOS 标识符规则，供在 [`crate::HmDriver::start_app`]
-/// 之前预先检查使用。
+/// 之前预先检查使用。规则同 [`AppIdentifier::new`]，非法值返回 [`DriverError::InvalidIdentifier`]。
 pub fn validate_ability(value: &str) -> Result<()> {
     if is_valid_identifier(value) {
         Ok(())

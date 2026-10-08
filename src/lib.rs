@@ -1,6 +1,48 @@
 //! HarmonyOS 原生 UI 自动化驱动。
 //!
 //! 本 crate 通过 HDC 启动官方 UITest Agent，再使用 Hypium JSON RPC 操作设备。
+//!
+//! # 接入
+//!
+//! 主机安装 HDC，设备开启调试并完成授权。异步 API 在启用 I/O 和时间驱动的
+//! Tokio runtime 中运行；默认启用内嵌 Agent 和同步 `blocking` 门面。
+//!
+//! ```no_run
+//! use hm_driver_rs::{HmDriver, Result, Selector};
+//! use std::time::Duration;
+//!
+//! # fn main() -> Result<()> {
+//! let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+//! runtime.block_on(async {
+//!     let driver = HmDriver::builder().connect().await?;
+//!     let operation = async {
+//!         let button = driver.wait_for(&Selector::new().text("确定"), Duration::from_secs(5)).await?;
+//!         button.click().await
+//!     }.await;
+//!     let cleanup = driver.close().await;
+//!     operation?;
+//!     cleanup
+//! })
+//! # }
+//! ```
+//!
+//! # API 导航
+//!
+//! - [`HmDriverBuilder`] / [`HdcConfig`]：设备选择、HDC 路径、Agent 来源和连接配置。
+//! - [`HmDriver`]：设备、输入、应用、文件、系统辅助、查询和会话生命周期。
+//! - [`Selector`] / [`Element`]：远端条件定位及控件操作。
+//! - [`UiNode`] / [`XPathElement`]：UI 树快照、本地查询和基于快照坐标的操作。
+//! - [`WindowFilter`] / [`UiWindow`]：窗口定位、属性及窗口管理。
+//! - [`GesturePath`] / [`Gesture`]：单指路径和多指轨迹。
+//! - [`DriverError`] / [`Result`]：参数、设备工具、RPC 与清理错误。
+//!
+//! # Features
+//!
+//! - `blocking`（默认）：同步 API 和进程级 Tokio 多线程 runtime。
+//! - `embedded-agents`（默认）：将官方 `.so` 编译进 crate，连接时校验并缓存。
+//!
+//! 关闭 `embedded-agents` 时，通过 [`AgentSource::Directory`] 指定官方 Agent 目录。
+//! 仅使用异步 API 时可以关闭 `blocking`；以下对齐记录在全部 feature 组合中可查阅。
 
 #![doc = include_str!("../docs/hypium-alignment.md")]
 

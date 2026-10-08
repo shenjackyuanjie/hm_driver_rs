@@ -1,4 +1,8 @@
 //! Agent 探测、部署以及 RPC 会话建立/恢复逻辑。
+//!
+//! 探测设备架构、UITest 版本和 API Level，部署已校验的 Agent 并启动对应传输服务。
+//! 建立会话时创建自有 HDC 转发、协商 API 方言和远端 Driver；阶段失败时清理关联资源。
+//! 关闭或恢复仅处理登记的转发与精确匹配的 singleness daemon。
 
 use super::{DriverConfig, RemoteFileGuard, next_operation_id, spawn_cleanup};
 use crate::agent::{AgentProfile, HarmonyTransport};

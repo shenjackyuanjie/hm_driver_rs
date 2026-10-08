@@ -1,3 +1,9 @@
+//! UI 树到 XML 的映射与主机 XPath 1.0 查询。
+//!
+//! 查询按文档顺序生成 [`XPathElement`] 属性和 bounds 快照，使用合法 XML 名称及字符
+//! 构造查询树。属性读取直接访问快照，点击等动作按保存的中心坐标注入；
+//! 页面变化后通过 [`crate::HmDriver::xpath`] 重新采集和查询。
+
 use crate::driver::HmDriver;
 use crate::ui::{UiNode, sanitize_xml_text};
 use crate::{Bounds, DriverError, Result};
@@ -9,6 +15,10 @@ use sxd_xpath::{Context, Factory, Value};
 use tracing::trace;
 
 /// XPath 查询结果的属性和 bounds 快照。
+///
+/// 属性读取在主机完成，动作使用采集时的 bounds 中心，通过保存的 Driver 注入坐标。
+/// 页面变化或会话恢复后，重新调用 [`HmDriver::xpath`] 获取新快照。
+/// 缺少可解析 bounds 的节点仍能读取属性，动作返回 [`DriverError::XPathNotFound`]。
 #[derive(Clone)]
 pub struct XPathElement {
     pub(crate) driver: HmDriver,
@@ -69,7 +79,9 @@ impl XPathElement {
         Ok(result)
     }
 
-    /// 节点是否有可交互的 bounds。
+    /// 判断快照是否含可解析的 bounds。
+    ///
+    /// 这是主机快照检查；查询设备上的当前存在性使用 [`HmDriver::xpath_exists`]。
     pub fn exists(&self) -> bool {
         self.bounds.is_some()
     }
@@ -84,12 +96,12 @@ impl XPathElement {
         &self.attributes
     }
 
-    /// 返回查询时保存的控件边界，若节点不可交互则返回 `None`。
+    /// 返回查询时保存的控件边界；缺少有效 bounds 时返回 `None`。
     pub fn bounds(&self) -> Option<Bounds> {
         self.bounds
     }
 
-    /// 返回控件边界中心点的绝对坐标，若节点不可交互则返回 `None`。
+    /// 返回快照边界中心的绝对像素坐标；缺少有效 bounds 时返回 `None`。
     pub fn center(&self) -> Option<crate::Point> {
         self.bounds.map(Bounds::center)
     }
