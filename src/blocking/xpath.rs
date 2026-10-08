@@ -75,7 +75,7 @@ impl XPathElement {
         block_on(self.inner.long_click())?
     }
 
-    /// 在匹配的元素中输入文本。
+    /// 先点击匹配的元素，再通过 Driver 的默认坐标输入接口执行文本输入。
     pub fn input_text(&self, text: &str) -> Result<()> {
         block_on(self.inner.input_text(text))?
     }

@@ -117,7 +117,7 @@ impl XPathElement {
         self.driver.long_click(self.required_center()?).await
     }
 
-    /// 点击该控件并输入指定文本。
+    /// 先点击该控件，再调用 [`crate::HmDriver::input_text`] 输入指定文本。
     pub async fn input_text(&self, text: &str) -> Result<()> {
         self.click().await?;
         self.driver.input_text(text).await

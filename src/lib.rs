@@ -2,6 +2,18 @@
 //!
 //! 本 crate 通过 HDC 启动官方 UITest Agent，再使用 Hypium JSON RPC 操作设备。
 
+#![doc = include_str!("../docs/hypium-alignment.md")]
+
+/// 当前对齐的官方 Hypium 软件包版本。
+///
+/// 用于 API 行为核对与 [`AgentCatalog`] 的资源来源校验。
+/// 已有功能和待补功能逐项记录在 crate 文档的「Hypium 对齐记录」中。
+///
+/// ```
+/// assert_eq!(hm_driver_rs::HYPIUM_ALIGNMENT_VERSION, "26.0.0.500");
+/// ```
+pub const HYPIUM_ALIGNMENT_VERSION: &str = "26.0.0.500";
+
 mod agent;
 mod catalog;
 mod driver;

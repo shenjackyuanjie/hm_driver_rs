@@ -6,6 +6,11 @@
 > 当前 crate 版本为 `1.0.1`，本 crate 以 Apache-2.0 许可发布，
 > 仓库内嵌的官方 UITest Agent 来源详见[许可注意事项](#许可注意事项)。
 
+当前对齐的官方 Hypium 版本可通过 `hm_driver_rs::HYPIUM_ALIGNMENT_VERSION` 读取，
+值为 `"26.0.0.500"`，用于 API 行为核对和 Agent 来源清单校验。
+已有功能和待补功能逐项记录在[Hypium 对齐记录](docs/hypium-alignment.md)，
+同一份记录也包含在 crate 的 Rust 代码文档中。
+
 ## 项目定位
 
 `hm_driver_rs` 不依赖 Hypium 或 XDevice 的 Python 实现，而是直接通过 HDC 启动设备端
@@ -268,9 +273,9 @@ Python 代码，也不新增 Python 依赖：
 
 工具不存在时返回 `DriverError::Unsupported`；网络模拟也会拒绝已知低于 20 的 API
 Level，未知 API Level 时按工具能力探测。其余系统/工具版本要求是官方参考条件，
-驱动不按版本字符串提前判定子命令可用性。命令执行失败继续返回 HDC 错误，无法识别的
-回显返回 `DriverError::Protocol`，不会默认为成功。新增系统能力目前通过模拟 HDC
-调用链验证，**尚未进行真机验证**，不代表所有设备均已支持。
+驱动先探测设备端工具，再执行对应子命令。命令执行失败返回 HDC 错误，无法识别的
+回显返回 `DriverError::Protocol`。系统辅助能力的单元测试使用模拟 HDC 验证调用链；
+真机验证列在[待补验证](docs/hypium-alignment.md#验证记录)中。
 
 - 时间使用有效的 `YYYY-MM-DD HH:MM:SS` 字符串，时区使用如 `Asia/Shanghai` 的
   IANA 标识；时区有效性最终由设备判断。

@@ -548,7 +548,9 @@ impl HmDriver {
             .map(|_| ())
     }
 
-    /// 输入文本到当前焦点控件。
+    /// 通过 `Driver.inputText` 在默认坐标 `(1, 1)` 处输入文本。
+    ///
+    /// 独立的当前焦点输入命令入口列在 crate 文档的待补功能中。
     pub async fn input_text(&self, text: &str) -> Result<()> {
         trace!(target: "hm_driver_rs::input", text, "输入文本");
         self.coordinate_call("inputText", json!([{"x": 1, "y": 1}, text]))

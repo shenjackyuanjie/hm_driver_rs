@@ -1,5 +1,5 @@
 use crate::agent::AgentProfile;
-use crate::{DriverError, Result};
+use crate::{DriverError, HYPIUM_ALIGNMENT_VERSION, Result};
 use serde::Deserialize;
 
 /// 随 crate 随带的官方 Agent 清单，可在不连接设备的情况下查阅已验证的 Agent 信息。
@@ -19,8 +19,9 @@ impl AgentCatalog {
     /// 同时验证 source_package、source_wheel 以及 Agent 数量是否与预期一致。
     pub fn load() -> Result<Self> {
         let catalog: Self = serde_json::from_str(include_str!("../assets/agents.json"))?;
-        if catalog.source_package != "devecotesting-hypium-26.0.0.500.zip"
-            || catalog.source_wheel != "xdevice_devicetest-26.0.0.500-py3-none-any.whl"
+        if catalog.source_package != format!("devecotesting-hypium-{HYPIUM_ALIGNMENT_VERSION}.zip")
+            || catalog.source_wheel
+                != format!("xdevice_devicetest-{HYPIUM_ALIGNMENT_VERSION}-py3-none-any.whl")
         {
             return Err(DriverError::InvalidAgentCatalog(
                 "官方包或 wheel 来源字段不匹配".into(),
@@ -57,13 +58,14 @@ mod tests {
     #[test]
     fn catalog_pins_official_files() {
         let catalog = AgentCatalog::load().unwrap();
+        assert_eq!(HYPIUM_ALIGNMENT_VERSION, "26.0.0.500");
         assert_eq!(
             catalog.source_package,
-            "devecotesting-hypium-26.0.0.500.zip"
+            format!("devecotesting-hypium-{HYPIUM_ALIGNMENT_VERSION}.zip")
         );
         assert_eq!(
             catalog.source_wheel,
-            "xdevice_devicetest-26.0.0.500-py3-none-any.whl"
+            format!("xdevice_devicetest-{HYPIUM_ALIGNMENT_VERSION}-py3-none-any.whl")
         );
         let pinned = [
             (

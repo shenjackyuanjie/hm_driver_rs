@@ -492,9 +492,9 @@ impl HmDriver {
         block_on(self.inner.rotate_crown(steps, speed))?
     }
 
-    /// 在当前焦点处输入文本。
+    /// 通过设备输入 API 在默认坐标 `(1, 1)` 处输入文本。
     ///
-    /// 文本会直接输入到当前获得焦点的输入控件中。
+    /// 对应异步 [`HmDriver::input_text`](crate::HmDriver::input_text)。
     pub fn input_text(&self, text: &str) -> Result<()> {
         block_on(self.inner.input_text(text))?
     }
