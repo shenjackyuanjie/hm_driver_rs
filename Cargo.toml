@@ -2,7 +2,7 @@
 name = "hm_driver_rs"
 version = "1.1.0"
 edition = "2024"
-rust-version = "1.86"
+rust-version = "1.88"
 publish = true
 description = "基于 HDC 和 UITest 的原生 Rust HarmonyOS UI 自动化驱动"
 authors = ["shenjackyuanjie"]

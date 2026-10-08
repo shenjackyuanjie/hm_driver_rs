@@ -17,7 +17,7 @@ Hypium JSON RPC 与 Agent 通信。一次连接的大致流程如下：
 
 ## 前置条件
 
-- Rust **1.86+**，使用 **edition 2024**。
+- Rust **1.88+**，使用 **edition 2024**。
 - 主机上需要安装可用的 `hdc`，并确保设备已经被 HDC 识别、在线且已授权。
 - HDC 路径按以下优先级解析，并在连接前固化为绝对路径：
   1. `HmDriverBuilder::hdc_path()` 显式设置的路径；

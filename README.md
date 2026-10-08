@@ -14,7 +14,7 @@
 
 ## 快速开始
 
-准备 Rust **1.86+** 和已授权、在线的 HarmonyOS 设备，确认 HDC 能发现设备：
+准备 Rust **1.88+** 和已授权、在线的 HarmonyOS 设备，确认 HDC 能发现设备：
 
 ```text
 hdc list targets -v
