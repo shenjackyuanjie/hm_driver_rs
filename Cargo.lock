@@ -158,7 +158,6 @@ dependencies = [
  "sxd-document",
  "sxd-xpath",
  "tempfile",
- "thiserror",
  "tokio",
  "tracing",
  "url",

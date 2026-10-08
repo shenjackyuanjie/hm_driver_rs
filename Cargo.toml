@@ -31,7 +31,6 @@ sha2 = { version = "0.11", default-features = false }
 sxd-document = "0.3"
 sxd-xpath = "0.4"
 tempfile = "3"
-thiserror = "2"
 tokio = { version = "1", features = ["fs", "io-util", "net", "process", "rt", "sync", "time"] }
 # 日志使用事件宏和 std。
 tracing = { version = "0.1", default-features = false, features = ["std"] }
