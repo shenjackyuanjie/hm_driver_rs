@@ -44,6 +44,7 @@
 //! 关闭 `embedded-agents` 时，通过 [`AgentSource::Directory`] 指定官方 Agent 目录。
 //! 仅使用异步 API 时可以关闭 `blocking`；以下对齐记录在全部 feature 组合中可查阅。
 
+#![warn(missing_docs)]
 #![doc = include_str!("../docs/hypium-alignment.md")]
 
 /// 当前对齐的官方 Hypium 软件包版本。

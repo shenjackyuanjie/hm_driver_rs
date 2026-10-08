@@ -1,3 +1,9 @@
+//! 设备 Driver 与连接 Builder 的同步门面。
+//!
+//! 公开方法对应 [`crate::HmDriver`] 和 [`crate::HmDriverBuilder`]，设备操作经共享
+//! Tokio runtime 同步等待完成；同步条件轮询在调用线程执行。
+//! 每个转发方法链接相应异步入口，统一说明参数、返回值、设备要求和生命周期。
+
 use super::{Element, UiWindow, XPathElement, block_on};
 use crate::{
     AbilityInfo, AgentProfile, AgentSource, AppIdentifier, BuiltinNetworkScenario, CommandOutput,
@@ -12,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tracing::trace;
 
-/// 阻塞 Driver 的 Builder。
+/// 阻塞 Driver 的 Builder，默认值和设置顺序见 [`crate::HmDriverBuilder`]。
 #[derive(Clone, Debug, Default)]
 pub struct HmDriverBuilder {
     /// 底层异步 Driver Builder 实例。
@@ -22,52 +28,55 @@ pub struct HmDriverBuilder {
 impl HmDriverBuilder {
     /// 设置目标设备选择器。
     ///
-    /// 指定要连接的设备，可通过序列号、USB 或网络地址来标识。
+    /// 参数、返回值和设备要求见 [`crate::HmDriverBuilder::device`]。
     pub fn device(mut self, selector: DeviceSelector) -> Self {
         self.inner = self.inner.device(selector);
         self
     }
 
-    /// 设置 hdc 可执行文件路径。
+    /// 设置 hdc 可执行文件的路径。
     ///
-    /// 默认情况下会自动在系统 PATH 中查找 `hdc`，若需要指定特定版本或
-    /// 自定义路径时使用此方法。
+    /// 参数、返回值和设备要求见 [`crate::HmDriverBuilder::hdc_path`]。
     pub fn hdc_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.inner = self.inner.hdc_path(path);
         self
     }
 
-    /// 设置 hdc 服务地址与端口。
+    /// 设置 hdc server 的地址和端口。
     ///
-    /// 用于连接远程 hdc 服务端，而非使用本地 hdc 守护进程。
+    /// 参数、返回值和设备要求见 [`crate::HmDriverBuilder::hdc_server`]。
     pub fn hdc_server(mut self, host: impl Into<String>, port: u16) -> Self {
         self.inner = self.inner.hdc_server(host, port);
         self
     }
 
-    /// 设置完整的 hdc 配置。
+    /// 直接使用完整的 HDC 配置。
     ///
-    /// 当需要同时配置多项 hdc 参数时，可使用此方法替代逐个设置。
+    /// 参数、返回值和设备要求见 [`crate::HmDriverBuilder::hdc_config`]。
     pub fn hdc_config(mut self, config: HdcConfig) -> Self {
         self.inner = self.inner.hdc_config(config);
         self
     }
 
-    /// 设置 agent 来源（APK 或 Hap 包）。
+    /// 设置官方 Agent 动态库来源（内嵌资源或外部目录）。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriverBuilder::agent_source`]。
     pub fn agent_source(mut self, source: AgentSource) -> Self {
         self.inner = self.inner.agent_source(source);
         self
     }
 
-    /// 设置驱动配置项（超时、重试策略等）。
+    /// 设置 Driver 运行时配置。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriverBuilder::driver_config`]。
     pub fn driver_config(mut self, config: DriverConfig) -> Self {
         self.inner = self.inner.driver_config(config);
         self
     }
 
-    /// 连接到设备并返回 [`HmDriver`] 实例。
+    /// 连接设备并建立 Hypium RPC 会话。
     ///
-    /// 此方法会在当前线程阻塞直到连接完成或超时失败。
+    /// 参数、返回值和设备要求见 [`crate::HmDriverBuilder::connect`]。
     pub fn connect(self) -> Result<HmDriver> {
         trace!(target: "hm_driver_rs::blocking", "阻塞 HmDriver::connect");
         block_on(self.inner.connect())?.map(|inner| HmDriver { inner })
@@ -75,6 +84,9 @@ impl HmDriverBuilder {
 }
 
 /// 与异步 Driver 能力对应的阻塞门面。
+///
+/// RPC/HDC 方法等待异步操作完成，返回对应结果；`Clone` 共享底层会话。
+/// 生命周期和错误说明见 [`crate::HmDriver`]，同步条件等待见 [`Self::wait_until`]。
 #[derive(Clone, Debug)]
 pub struct HmDriver {
     /// 底层异步 Driver 实例。
@@ -82,241 +94,278 @@ pub struct HmDriver {
 }
 
 impl HmDriver {
-    /// 创建一个默认配置的 `HmDriverBuilder`。
+    /// 创建一个新的 [`HmDriverBuilder`]。
     ///
-    /// 使用 builder 模式链式调用配置方法，最后通过 `connect` 建立连接。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::builder`]。
     pub fn builder() -> HmDriverBuilder {
         HmDriverBuilder::default()
     }
 
-    /// 静态方法：发现当前 hdc 服务可识别的设备列表。
+    /// 使用当前 HDC 配置发现设备，不建立 Agent 会话。
     ///
-    /// 无需建立连接即可枚举设备，返回所有已连接设备的基本描述信息。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::discover_devices`]。
     pub fn discover_devices(config: HdcConfig) -> Result<Vec<DeviceDescriptor>> {
         block_on(crate::HmDriver::discover_devices(config))?
     }
 
-    /// 返回当前连接的 agent 配置信息。
+    /// 返回当前使用的 Agent 版本、架构、文件校验和传输信息。
     ///
-    /// 包含 agent 的版本号、包名、支持的能力等元数据。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::agent_profile`]。
     pub fn agent_profile(&self) -> &AgentProfile {
         self.inner.agent_profile()
     }
 
-    /// 返回当前 driver 实例的连接世代号。
+    /// 返回当前会话的代际编号，用于区分远端引用归属的会话。
     ///
-    /// 每次重新连接后此值递增，可用于判断连接状态是否已变化。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::generation`]。
     pub fn generation(&self) -> u64 {
         self.inner.generation()
     }
 
-    /// 查询当前设备支持的 API 方言版本。
+    /// 返回当前会话协商出的 Hypium API 方言（Modern/Legacy）。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::dialect`]。
     pub fn dialect(&self) -> Result<crate::ApiDialect> {
         block_on(self.inner.dialect())?
     }
 
-    /// 尝试恢复 driver 的连接状态。
+    /// 恢复已断开的会话，重新部署 Agent、建立转发并创建远端 Driver。
     ///
-    /// 当检测到连接异常时调用此方法可尝试重新建立连接。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::recover`]。
     pub fn recover(&self) -> Result<()> {
         trace!(target: "hm_driver_rs::blocking", "阻塞 HmDriver::recover");
         block_on(self.inner.recover())?
     }
 
-    /// 关闭当前 driver 连接，释放相关资源。
+    /// 主动关闭共享会话并等待资源清理。
     ///
-    /// 调用后 driver 实例不应再被使用。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::close`]。
     pub fn close(&self) -> Result<()> {
         trace!(target: "hm_driver_rs::blocking", "阻塞 HmDriver::close");
         block_on(self.inner.close())?
     }
 
-    /// 直接调用 Hypium 底层 API。
+    /// 直接调用任意 Hypium RPC API。
     ///
-    /// 当现有封装方法无法满足需求时，可通过此方法调用任意 Hypium 接口。
-    ///
-    /// # 参数
-    ///
-    /// * `api` - Hypium API 名称
-    /// * `this` - 可选的调用目标（如元素 ID）
-    /// * `args` - 以 JSON Value 形式传入的参数
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::call_hypium_api`]。
     pub fn call_hypium_api(&self, api: &str, this: Option<&str>, args: Value) -> Result<Value> {
         block_on(self.inner.call_hypium_api(api, this, args))?
     }
 
-    /// 获取设备屏幕的宽高尺寸。
+    /// 获取当前显示设备的尺寸（宽度 x 高度，单位为像素）。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::display_size`]。
     pub fn display_size(&self) -> Result<DisplaySize> {
         block_on(self.inner.display_size())?
     }
 
-    /// 获取指定显示设备的宽高尺寸。
+    /// 获取指定显示设备的尺寸（宽度 x 高度，单位为像素）。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::display_size_for`]。
     pub fn display_size_for(&self, display_id: u32) -> Result<DisplaySize> {
         block_on(self.inner.display_size_for(display_id))?
     }
 
-    /// 获取设备屏幕当前的旋转方向。
+    /// 获取当前显示旋转角度。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::display_rotation`]。
     pub fn display_rotation(&self) -> Result<DisplayRotation> {
         block_on(self.inner.display_rotation())?
     }
 
-    /// 设置设备屏幕的旋转方向。
+    /// 设置当前显示旋转角度（0°/90°/180°/270°）。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::set_display_rotation`]。
     pub fn set_display_rotation(&self, rotation: DisplayRotation) -> Result<()> {
         block_on(self.inner.set_display_rotation(rotation))?
     }
 
-    /// 获取设备的详细信息（型号、系统版本、分辨率等）。
+    /// 收集完整的设备信息（型号、系统版本、CPU ABI、WLAN IP、显示尺寸与旋转角度等）。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::device_info`]。
     pub fn device_info(&self) -> Result<DeviceInfo> {
         block_on(self.inner.device_info())?
     }
 
-    /// 点亮设备屏幕。
+    /// 点亮屏幕（通过 `power-shell wakeup`）。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::screen_on`]。
     pub fn screen_on(&self) -> Result<()> {
         block_on(self.inner.screen_on())?
     }
 
-    /// 熄灭设备屏幕。
+    /// 熄灭屏幕。仅在屏幕当前为亮屏状态时发送电源键。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::screen_off`]。
     pub fn screen_off(&self) -> Result<()> {
         block_on(self.inner.screen_off())?
     }
 
-    /// 切换设备屏幕的开关状态（亮/灭）。
+    /// 无条件发送一次电源键，用于显式切换屏幕电源状态。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::toggle_screen_power`]。
     pub fn toggle_screen_power(&self) -> Result<()> {
         block_on(self.inner.toggle_screen_power())?
     }
 
-    /// 获取设备屏幕当前的亮灭状态。
+    /// 获取当前屏幕电源状态（Awake / Sleep / Inactive）。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::screen_state`]。
     pub fn screen_state(&self) -> Result<ScreenState> {
         block_on(self.inner.screen_state())?
     }
 
-    /// 获取设备 WLAN 接口的 IP 地址。
+    /// 获取 WLAN 接口的非回环 IPv4/IPv6 地址。
     ///
-    /// 若设备未连接 WLAN，则返回 `None`。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::wlan_ip`]。
     pub fn wlan_ip(&self) -> Result<Option<IpAddr>> {
         block_on(self.inner.wlan_ip())?
     }
 
-    /// 解锁设备屏幕。
+    /// 解锁屏幕：先亮屏，再从底部向上滑动。
     ///
-    /// 相当于执行滑动解锁操作，具体行为取决于设备当前的锁屏方式。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::unlock`]。
     pub fn unlock(&self) -> Result<()> {
         block_on(self.inner.unlock())?
     }
 
-    /// 按下指定的原始键码（整数形式）。
+    /// 通过按键码（原始值）发送按键事件。
     ///
-    /// # 参数
-    ///
-    /// * `key_code` - 键码的整数值，请参考设备厂商提供的键码映射表
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::press_key`]。
     pub fn press_key(&self, key_code: u32) -> Result<()> {
         block_on(self.inner.press_key(key_code))?
     }
 
-    /// 按下指定的键码（使用预定义的 `KeyCode` 枚举）。
+    /// 通过 [`KeyCode`] 枚举发送按键事件。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::press_key_code`]。
     pub fn press_key_code(&self, key_code: KeyCode) -> Result<()> {
         block_on(self.inner.press_key_code(key_code))?
     }
 
-    /// 同时按下多个键（组合键）。
+    /// 同时触发两个或三个组合键。
     ///
-    /// 例如 `[KeyCode::Ctrl, KeyCode::C]` 可实现复制操作。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::press_key_combination`]。
     pub fn press_key_combination(&self, key_codes: &[KeyCode]) -> Result<()> {
         block_on(self.inner.press_key_combination(key_codes))?
     }
 
-    /// 模拟按下返回键。
+    /// 发送返回键。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::go_back`]。
     pub fn go_back(&self) -> Result<()> {
         block_on(self.inner.go_back())?
     }
 
-    /// 模拟按下 Home 键回到桌面。
+    /// 发送主页键。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::go_home`]。
     pub fn go_home(&self) -> Result<()> {
         block_on(self.inner.go_home())?
     }
 
     /// 在指定绝对坐标处点击。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::click`]。
     pub fn click(&self, point: Point) -> Result<()> {
         block_on(self.inner.click(point))?
     }
 
-    /// 在指定位置方向（如左上、中心等）处点击。
+    /// 在指定绝对或归一化坐标处点击。
     ///
-    /// 位置基于目标元素的边界框计算。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::click_position`]。
     pub fn click_position(&self, position: Position) -> Result<()> {
         block_on(self.inner.click_position(position))?
     }
 
     /// 在指定绝对坐标处双击。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::double_click`]。
     pub fn double_click(&self, point: Point) -> Result<()> {
         block_on(self.inner.double_click(point))?
     }
 
-    /// 在指定位置方向处双击。
+    /// 在指定绝对或归一化坐标处双击。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::double_click_position`]。
     pub fn double_click_position(&self, position: Position) -> Result<()> {
         block_on(self.inner.double_click_position(position))?
     }
 
     /// 在指定绝对坐标处长按。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::long_click`]。
     pub fn long_click(&self, point: Point) -> Result<()> {
         block_on(self.inner.long_click(point))?
     }
 
-    /// 在指定位置方向处长按。
+    /// 在指定绝对或归一化坐标处长按。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::long_click_position`]。
     pub fn long_click_position(&self, position: Position) -> Result<()> {
         block_on(self.inner.long_click_position(position))?
     }
 
     /// 在指定绝对坐标处长按给定时长。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::long_click_for`]。
     pub fn long_click_for(&self, point: Point, duration: Duration) -> Result<()> {
         block_on(self.inner.long_click_for(point, duration))?
     }
 
     /// 在指定绝对或归一化位置长按给定时长。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::long_click_position_for`]。
     pub fn long_click_position_for(&self, position: Position, duration: Duration) -> Result<()> {
         block_on(self.inner.long_click_position_for(position, duration))?
     }
 
-    /// 从起点到终点执行滑动操作（使用绝对坐标）。
+    /// 从起点滑动到终点，`speed` 为滑动速度（200–40000 像素/秒）。
     ///
-    /// # 参数
-    ///
-    /// * `from` - 起始坐标
-    /// * `to` - 终止坐标
-    /// * `speed` - 滑动速度（像素/秒）
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::swipe`]。
     pub fn swipe(&self, from: Point, to: Point, speed: u32) -> Result<()> {
         block_on(self.inner.swipe(from, to, speed))?
     }
 
-    /// 从起点到终点按指定持续时间滑动（毫秒）。
+    /// 从起点滑动到终点，`duration_ms` 为滑动持续时间（毫秒）。
+    /// 内部根据距离与持续时间自动计算所需速度，再调用底层 `swipe` API。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::swipe_with_duration_ms`]。
     pub fn swipe_with_duration_ms(&self, from: Point, to: Point, duration_ms: u32) -> Result<()> {
         block_on(self.inner.swipe_with_duration_ms(from, to, duration_ms))?
     }
 
-    /// 从起点到终点执行滑动操作（使用位置方向）。
+    /// 从归一化或绝对坐标位置滑动到目标位置。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::swipe_positions`]。
     pub fn swipe_positions(&self, from: Position, to: Position, speed: u32) -> Result<()> {
         block_on(self.inner.swipe_positions(from, to, speed))?
     }
 
-    /// 执行拖拽操作（从起点到终点，使用绝对坐标）。
+    /// 从一个绝对坐标拖拽到另一个绝对坐标。
     ///
-    /// 拖拽与滑动的区别在于拖拽在终点处有短暂停留。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::drag`]。
     pub fn drag(&self, from: Point, to: Point, speed: u32) -> Result<()> {
         block_on(self.inner.drag(from, to, speed))?
     }
 
-    /// 执行拖拽操作（使用位置方向）。
+    /// 接受绝对或归一化坐标的拖拽操作。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::drag_positions`]。
     pub fn drag_positions(&self, from: Position, to: Position, speed: u32) -> Result<()> {
         block_on(self.inner.drag_positions(from, to, speed))?
     }
 
-    /// 执行快速滑动（fling）操作（使用绝对坐标）。
+    /// 执行带固定步长的抛滑操作。
     ///
-    /// fling 是一种快速甩动操作，有步长参数控制滑动的粒度。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::fling`]。
     pub fn fling(&self, from: Point, to: Point, step_length: u32, speed: u32) -> Result<()> {
         block_on(self.inner.fling(from, to, step_length, speed))?
     }
 
-    /// 执行快速滑动（fling）操作（使用位置方向）。
+    /// 接受绝对或归一化坐标的抛滑操作。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::fling_positions`]。
     pub fn fling_positions(
         &self,
         from: Position,
@@ -327,14 +376,9 @@ impl HmDriver {
         block_on(self.inner.fling_positions(from, to, step_length, speed))?
     }
 
-    /// 按指定方向、区域和比例滑动。
+    /// 在指定区域内按方向滑动一定比例。
     ///
-    /// # 参数
-    ///
-    /// * `direction` - 滑动方向（上/下/左/右）
-    /// * `area` - 滑动区域（全屏/局部等）
-    /// * `scale` - 滑动距离占区域尺寸的比例（0.0 ~ 1.0）
-    /// * `speed` - 滑动速度（像素/秒）
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::swipe_direction`]。
     pub fn swipe_direction(
         &self,
         direction: SwipeDirection,
@@ -345,44 +389,58 @@ impl HmDriver {
         block_on(self.inner.swipe_direction(direction, area, scale, speed))?
     }
 
-    /// 执行自定义手势序列。
+    /// 执行一个多指手势轨迹。
     ///
-    /// 手势由一系列连续的触摸事件组成，可实现复杂交互如画圆、多点触控等。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::perform_gesture`]。
     pub fn perform_gesture(&self, gesture: &Gesture) -> Result<()> {
         block_on(self.inner.perform_gesture(gesture))?
     }
 
     /// 使用一个或两个指关节点执行单次或双次敲击。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::knuckle_knock`]。
     pub fn knuckle_knock(&self, points: &[Point], times: u8) -> Result<()> {
         block_on(self.inner.knuckle_knock(points, times))?
     }
 
     /// 使用绝对或归一化位置执行指关节敲击。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::knuckle_knock_positions`]。
     pub fn knuckle_knock_positions(&self, positions: &[Position], times: u8) -> Result<()> {
         block_on(self.inner.knuckle_knock_positions(positions, times))?
     }
 
     /// 使用指关节注入自定义轨迹。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::perform_knuckle_gesture`]。
     pub fn perform_knuckle_gesture(&self, gesture: &Gesture) -> Result<()> {
         block_on(self.inner.perform_knuckle_gesture(gesture))?
     }
 
     /// 以指定中心、半径和速度执行指关节闭合圈选。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::knuckle_select`]。
     pub fn knuckle_select(&self, center: Point, radius: u32, speed: u32) -> Result<()> {
         block_on(self.inner.knuckle_select(center, radius, speed))?
     }
 
     /// 以绝对或归一化中心位置执行指关节闭合圈选。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::knuckle_select_position`]。
     pub fn knuckle_select_position(&self, center: Position, radius: u32, speed: u32) -> Result<()> {
         block_on(self.inner.knuckle_select_position(center, radius, speed))?
     }
 
-    /// 鼠标单击，支持最多两个组合键。
+    /// 鼠标单击，支持同时按住最多两个键盘按键。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::mouse_click`]。
     pub fn mouse_click(&self, point: Point, button: MouseButton, keys: &[KeyCode]) -> Result<()> {
         block_on(self.inner.mouse_click(point, button, keys))?
     }
 
     /// 在绝对或归一化位置执行鼠标单击。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::mouse_click_position`]。
     pub fn mouse_click_position(
         &self,
         position: Position,
@@ -392,7 +450,9 @@ impl HmDriver {
         block_on(self.inner.mouse_click_position(position, button, keys))?
     }
 
-    /// 鼠标双击。
+    /// 鼠标双击，支持同时按住最多两个键盘按键。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::mouse_double_click`]。
     pub fn mouse_double_click(
         &self,
         point: Point,
@@ -402,7 +462,9 @@ impl HmDriver {
         block_on(self.inner.mouse_double_click(point, button, keys))?
     }
 
-    /// 鼠标长按。
+    /// 鼠标长按，支持同时按住最多两个键盘按键。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::mouse_long_click`]。
     pub fn mouse_long_click(
         &self,
         point: Point,
@@ -412,7 +474,9 @@ impl HmDriver {
         block_on(self.inner.mouse_long_click(point, button, keys))?
     }
 
-    /// 执行指定时长的鼠标长按。
+    /// 通过系统输入命令执行指定时长的鼠标长按。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::mouse_long_click_for`]。
     pub fn mouse_long_click_for(
         &self,
         point: Point,
@@ -423,41 +487,57 @@ impl HmDriver {
     }
 
     /// 滚动鼠标滚轮。正数向前/向上，负数向后/向下。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::mouse_scroll`]。
     pub fn mouse_scroll(&self, point: Point, distance: i32, keys: &[KeyCode]) -> Result<()> {
         block_on(self.inner.mouse_scroll(point, distance, keys))?
     }
 
     /// 将鼠标指针直接移动到指定坐标。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::mouse_move_to`]。
     pub fn mouse_move_to(&self, point: Point) -> Result<()> {
         block_on(self.inner.mouse_move_to(point))?
     }
 
-    /// 沿轨迹移动鼠标。
+    /// 按给定速度沿轨迹移动鼠标。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::mouse_move`]。
     pub fn mouse_move(&self, from: Point, to: Point, speed: u32) -> Result<()> {
         block_on(self.inner.mouse_move(from, to, speed))?
     }
 
     /// 按住鼠标左键拖拽。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::mouse_drag`]。
     pub fn mouse_drag(&self, from: Point, to: Point, speed: u32) -> Result<()> {
         block_on(self.inner.mouse_drag(from, to, speed))?
     }
 
     /// 触控笔点击。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::pen_click`]。
     pub fn pen_click(&self, point: Point) -> Result<()> {
         block_on(self.inner.pen_click(point))?
     }
 
     /// 触控笔双击。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::pen_double_click`]。
     pub fn pen_double_click(&self, point: Point) -> Result<()> {
         block_on(self.inner.pen_double_click(point))?
     }
 
-    /// 触控笔长按。
+    /// 触控笔长按，可指定 0 到 1 的压力。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::pen_long_click`]。
     pub fn pen_long_click(&self, point: Point, pressure: Option<f64>) -> Result<()> {
         block_on(self.inner.pen_long_click(point, pressure))?
     }
 
-    /// 触控笔滑动。
+    /// 触控笔滑动，可指定速度和压力。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::pen_swipe`]。
     pub fn pen_swipe(
         &self,
         from: Point,
@@ -469,11 +549,15 @@ impl HmDriver {
     }
 
     /// 使用触控笔注入自定义轨迹。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::perform_pen_gesture`]。
     pub fn perform_pen_gesture(&self, gesture: &Gesture, pressure: Option<f64>) -> Result<()> {
         block_on(self.inner.perform_pen_gesture(gesture, pressure))?
     }
 
     /// 模拟触控板多指滑动。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::touchpad_swipe`]。
     pub fn touchpad_swipe(
         &self,
         direction: SwipeDirection,
@@ -487,154 +571,205 @@ impl HmDriver {
         )?
     }
 
-    /// 旋转手表表冠。
+    /// 旋转手表表冠。正步数为顺时针，负步数为逆时针。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::rotate_crown`]。
     pub fn rotate_crown(&self, steps: i32, speed: Option<u16>) -> Result<()> {
         block_on(self.inner.rotate_crown(steps, speed))?
     }
 
-    /// 通过设备输入 API 在默认坐标 `(1, 1)` 处输入文本。
+    /// 通过 `Driver.inputText` 在默认坐标 `(1, 1)` 处输入文本。
     ///
-    /// 对应异步 [`HmDriver::input_text`](crate::HmDriver::input_text)。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::input_text`]。
     pub fn input_text(&self, text: &str) -> Result<()> {
         block_on(self.inner.input_text(text))?
     }
 
     /// 隐藏当前系统软键盘。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::hide_keyboard`]。
     pub fn hide_keyboard(&self) -> Result<()> {
         block_on(self.inner.hide_keyboard())?
     }
 
     /// 清空当前获得焦点的输入框。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::clear_text_on_current_cursor`]。
     pub fn clear_text_on_current_cursor(&self) -> Result<()> {
         block_on(self.inner.clear_text_on_current_cursor())?
     }
 
     /// 设置系统界面为深色或浅色模式。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::set_view_mode`]。
     pub fn set_view_mode(&self, mode: ViewMode) -> Result<()> {
         block_on(self.inner.set_view_mode(mode))?
     }
 
     /// 将系统时间设置为 `YYYY-MM-DD HH:MM:SS`。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::set_system_time`]。
     pub fn set_system_time(&self, value: &str) -> Result<()> {
         block_on(self.inner.set_system_time(value))?
     }
 
     /// 读取系统时间，返回 `YYYY-MM-DD HH:MM:SS`。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::system_time`]。
     pub fn system_time(&self) -> Result<String> {
         block_on(self.inner.system_time())?
     }
 
-    /// 设置 IANA 时区。
+    /// 设置 IANA 时区，例如 `Asia/Shanghai` 或 `Etc/UTC`。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::set_timezone`]。
     pub fn set_timezone(&self, timezone: &str) -> Result<()> {
         block_on(self.inner.set_timezone(timezone))?
     }
 
     /// 读取当前 IANA 时区标识。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::timezone`]。
     pub fn timezone(&self) -> Result<String> {
         block_on(self.inner.timezone())?
     }
 
     /// 将文本写入系统剪贴板。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::write_clipboard`]。
     pub fn write_clipboard(&self, value: &str) -> Result<()> {
         block_on(self.inner.write_clipboard(value))?
     }
 
-    /// 读取系统剪贴板文本。
+    /// 读取系统剪贴板文本；剪贴板为空时返回空字符串。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::read_clipboard`]。
     pub fn read_clipboard(&self) -> Result<String> {
         block_on(self.inner.read_clipboard())?
     }
 
     /// 清空系统剪贴板。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::clear_clipboard`]。
     pub fn clear_clipboard(&self) -> Result<()> {
         block_on(self.inner.clear_clipboard())?
     }
 
     /// 读取本地字体文件声明的字体名称。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::font_name`]。
     pub fn font_name(&self, local: impl AsRef<Path>) -> Result<String> {
         block_on(self.inner.font_name(local))?
     }
 
     /// 安装本地字体文件。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::install_font`]。
     pub fn install_font(&self, local: impl AsRef<Path>) -> Result<()> {
         block_on(self.inner.install_font(local))?
     }
 
     /// 按字体名称卸载字体。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::uninstall_font`]。
     pub fn uninstall_font(&self, font_name: &str) -> Result<()> {
         block_on(self.inner.uninstall_font(font_name))?
     }
 
     /// 启用设备端网络模拟工具。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::enable_network_simulation`]。
     pub fn enable_network_simulation(&self) -> Result<()> {
         block_on(self.inner.enable_network_simulation())?
     }
 
     /// 禁用设备端网络模拟工具。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::disable_network_simulation`]。
     pub fn disable_network_simulation(&self) -> Result<()> {
         block_on(self.inner.disable_network_simulation())?
     }
 
     /// 列出设备端可用的网络模拟场景。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::network_scenarios`]。
     pub fn network_scenarios(&self) -> Result<Vec<NetworkScenarioInfo>> {
         block_on(self.inner.network_scenarios())?
     }
 
     /// 启动已有网络模拟场景。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::start_network_scenario`]。
     pub fn start_network_scenario(&self, scenario_id: u32) -> Result<()> {
         block_on(self.inner.start_network_scenario(scenario_id))?
     }
 
     /// 启动官方内置网络模拟场景。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::start_builtin_network_scenario`]。
     pub fn start_builtin_network_scenario(&self, scenario: BuiltinNetworkScenario) -> Result<()> {
         block_on(self.inner.start_builtin_network_scenario(scenario))?
     }
 
     /// 新建并启动自定义网络模拟场景，返回设备分配的场景 ID。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::start_custom_network_scenario`]。
     pub fn start_custom_network_scenario(&self, scenario: &NetworkScenario) -> Result<u32> {
         block_on(self.inner.start_custom_network_scenario(scenario))?
     }
 
     /// 停止指定网络模拟场景。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::stop_network_scenario`]。
     pub fn stop_network_scenario(&self, scenario_id: u32) -> Result<()> {
         block_on(self.inner.stop_network_scenario(scenario_id))?
     }
 
     /// 删除指定自定义网络模拟场景。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::delete_network_scenario`]。
     pub fn delete_network_scenario(&self, scenario_id: u32) -> Result<()> {
         block_on(self.inner.delete_network_scenario(scenario_id))?
     }
 
-    /// 等待设备进入空闲状态。
+    /// 等待 UI 连续空闲指定时长，最长等待 `timeout`。
     ///
-    /// # 参数
-    ///
-    /// * `idle_time` - 持续空闲多久即视为空闲状态
-    /// * `timeout` - 等待的总超时时间
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::wait_for_idle`]。
     pub fn wait_for_idle(&self, idle_time: Duration, timeout: Duration) -> Result<()> {
         block_on(self.inner.wait_for_idle(idle_time, timeout))?
     }
 
     /// 开始一次 UI 事件监听。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::start_listen_ui_event`]。
     pub fn start_listen_ui_event(&self, event_type: UiEventType) -> Result<()> {
         block_on(self.inner.start_listen_ui_event(event_type))?
     }
 
     /// 开始一次 Toast 监听。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::start_listen_toast`]。
     pub fn start_listen_toast(&self) -> Result<()> {
         block_on(self.inner.start_listen_toast())?
     }
 
-    /// 等待并读取 UI 事件。
+    /// 等待并读取本次监听捕获的 UI 事件。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::get_latest_ui_event`]。
     pub fn get_latest_ui_event(&self, timeout: Duration) -> Result<Option<UiEvent>> {
         block_on(self.inner.get_latest_ui_event(timeout))?
     }
 
-    /// 等待并读取 Toast 文本。
+    /// 等待并读取本次 Toast 监听捕获的文本。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::get_latest_toast`]。
     pub fn get_latest_toast(&self, timeout: Duration) -> Result<Option<String>> {
         block_on(self.inner.get_latest_toast(timeout))?
     }
 
-    /// 等待并检查 Toast 文本。
+    /// 等待 Toast 并按给定规则检查文本。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::check_toast`]。
     pub fn check_toast(
         &self,
         expected: &str,
@@ -644,155 +779,163 @@ impl HmDriver {
         block_on(self.inner.check_toast(expected, pattern, timeout))?
     }
 
-    /// 安装应用包（APK/Hap）。
+    /// 通过 `hdc install` 安装主机上的应用包文件。
     ///
-    /// # 参数
-    ///
-    /// * `package` - 本地安装包文件路径
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::install_app`]。
     pub fn install_app(&self, package: impl AsRef<Path>) -> Result<()> {
         block_on(self.inner.install_app(package))?
     }
 
-    /// 卸载指定应用。
+    /// 卸载指定包名的应用。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::uninstall_app`]。
     pub fn uninstall_app(&self, bundle: &AppIdentifier) -> Result<()> {
         block_on(self.inner.uninstall_app(bundle))?
     }
 
-    /// 启动指定应用的某个 Ability。
+    /// 启动应用。
     ///
-    /// # 参数
-    ///
-    /// * `bundle` - 应用标识符
-    /// * `ability` - 可选的 Ability 名称，不传则启动 Main Ability
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::start_app`]。
     pub fn start_app(&self, bundle: &AppIdentifier, ability: Option<&str>) -> Result<()> {
         block_on(self.inner.start_app(bundle, ability))?
     }
 
-    /// 使用指定模式打开 URL。
+    /// 使用系统浏览器或默认方式打开 URL。
     ///
-    /// 模式（如浏览器打开、应用内打开等）由 `OpenUrlMode` 指定。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::open_url`]。
     pub fn open_url(&self, value: &str, mode: OpenUrlMode) -> Result<()> {
         block_on(self.inner.open_url(value, mode))?
     }
 
-    /// 停止指定应用的后台运行。
+    /// 强制停止指定应用的进程。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::stop_app`]。
     pub fn stop_app(&self, bundle: &AppIdentifier) -> Result<()> {
         block_on(self.inner.stop_app(bundle))?
     }
 
-    /// 清除指定应用的数据。
+    /// 清除指定应用的用户缓存和数据。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::clear_app`]。
     pub fn clear_app(&self, bundle: &AppIdentifier) -> Result<()> {
         block_on(self.inner.clear_app(bundle))?
     }
 
-    /// 查询指定应用的主 Ability 名称。
+    /// 查询应用的 main ability 名称。
     ///
-    /// 返回 `None` 表示未找到主 Ability。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::main_ability`]。
     pub fn main_ability(&self, bundle: &AppIdentifier) -> Result<Option<String>> {
         block_on(self.inner.main_ability(bundle))?
     }
 
-    /// 获取指定应用的详细信息（JSON 格式）。
+    /// 查询应用的详细信息，返回 `bm dump` 的 JSON 输出。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::app_info`]。
     pub fn app_info(&self, bundle: &AppIdentifier) -> Result<Value> {
         block_on(self.inner.app_info(bundle))?
     }
 
-    /// 获取指定应用的所有 Ability 列表。
+    /// 解析应用的 Ability 列表。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::app_abilities`]。
     pub fn app_abilities(&self, bundle: &AppIdentifier) -> Result<Vec<AbilityInfo>> {
         block_on(self.inner.app_abilities(bundle))?
     }
 
-    /// 获取指定应用的主 Ability 详细信息。
+    /// 查询应用的 main ability 详情。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::main_ability_info`]。
     pub fn main_ability_info(&self, bundle: &AppIdentifier) -> Result<Option<AbilityInfo>> {
         block_on(self.inner.main_ability_info(bundle))?
     }
 
-    /// 获取当前前台运行的应用程序信息。
+    /// 获取第一个前台任务的 `(包名, Ability 名称)`；无前台任务返回 `None`。
     ///
-    /// 返回 `(AppIdentifier, 应用名称)` 元组，若无前台应用则返回 `None`。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::current_app`]。
     pub fn current_app(&self) -> Result<Option<(AppIdentifier, String)>> {
         block_on(self.inner.current_app())?
     }
 
     /// 获取所有前台任务的应用和 Ability。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::foreground_apps`]。
     pub fn foreground_apps(&self) -> Result<Vec<(AppIdentifier, String)>> {
         block_on(self.inner.foreground_apps())?
     }
 
     /// 判断指定应用是否处于任一前台任务中。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::is_app_foreground`]。
     pub fn is_app_foreground(&self, bundle: &AppIdentifier) -> Result<bool> {
         block_on(self.inner.is_app_foreground(bundle))?
     }
 
-    /// 将本地文件推送到设备。
+    /// 将本地文件发送到设备端。
     ///
-    /// # 参数
-    ///
-    /// * `local` - 本地文件路径
-    /// * `remote` - 设备上的目标路径
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::push_file`]。
     pub fn push_file(&self, local: impl AsRef<Path>, remote: &str) -> Result<()> {
         block_on(self.inner.push_file(local, remote))?
     }
 
-    /// 从设备拉取文件到本地。
+    /// 从设备端拉取文件到本地。
     ///
-    /// # 参数
-    ///
-    /// * `remote` - 设备上的源文件路径
-    /// * `local` - 本地目标路径
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::pull_file`]。
     pub fn pull_file(&self, remote: &str, local: impl AsRef<Path>) -> Result<()> {
         block_on(self.inner.pull_file(remote, local))?
     }
 
-    /// 在设备上执行原始 shell 命令并返回输出。
+    /// 显式执行设备端 shell。字符串不会交给主机 shell。
     ///
-    /// # 参数
-    ///
-    /// * `command` - shell 命令字符串
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::raw_shell`]。
     pub fn raw_shell(&self, command: &str) -> Result<CommandOutput> {
         block_on(self.inner.raw_shell(command))?
     }
 
-    /// 列出当前所有端口转发规则。
+    /// 列出设备端所有已建立的端口转发规则。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::list_forwards`]。
     pub fn list_forwards(&self) -> Result<Vec<ForwardEntry>> {
         block_on(self.inner.list_forwards())?
     }
 
-    /// 添加一条端口转发规则。
+    /// 建立一个自定义端口转发，与驱动自身使用的 RPC 转发互不影响。
     ///
-    /// # 参数
-    ///
-    /// * `local_port` - 本地端口号
-    /// * `remote` - 设备上的目标地址（如 `tcp:8080`）
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::forward`]。
     pub fn forward(&self, local_port: u16, remote: &str) -> Result<()> {
         block_on(self.inner.forward(local_port, remote))?
     }
 
-    /// 移除一条端口转发规则。
+    /// 移除一个自定义端口转发。
     ///
-    /// 参数必须与添加时完全一致才能匹配。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::remove_forward`]。
     pub fn remove_forward(&self, local_port: u16, remote: &str) -> Result<()> {
         block_on(self.inner.remove_forward(local_port, remote))?
     }
 
-    /// 截取当前屏幕并返回 PNG 字节数据。
+    /// 截取当前屏幕（自动选择可用方式），返回 JPEG/PNG 字节。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::screenshot`]。
     pub fn screenshot(&self) -> Result<Vec<u8>> {
         block_on(self.inner.screenshot())?
     }
 
-    /// 使用指定的截图方法截取屏幕并返回 PNG 字节数据。
+    /// 使用指定的截图方式截取当前屏幕。
     ///
-    /// 不同截图方法（如 BMP 编码、JPEG 编码等）可能在速度和质量上有所差异。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::screenshot_with_method`]。
     pub fn screenshot_with_method(&self, method: ScreenshotMethod) -> Result<Vec<u8>> {
         block_on(self.inner.screenshot_with_method(method))?
     }
 
-    /// 截取当前屏幕并保存到本地文件。
+    /// 截取屏幕并直接保存到本地文件（自动选择截图方式）。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::screenshot_to`]。
     pub fn screenshot_to(&self, path: impl AsRef<Path>) -> Result<()> {
         block_on(self.inner.screenshot_to(path))?
     }
 
-    /// 使用指定的截图方法截取屏幕并保存到本地文件。
+    /// 使用指定的截图方式截取屏幕并保存到本地文件。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::screenshot_to_with_method`]。
     pub fn screenshot_to_with_method(
         &self,
         path: impl AsRef<Path>,
@@ -801,37 +944,45 @@ impl HmDriver {
         block_on(self.inner.screenshot_to_with_method(path, method))?
     }
 
-    /// 获取当前屏幕的 UI 树结构。
+    /// 获取当前界面的 UI 树（通过 `uitest dumpLayout`）。
     ///
-    /// 返回根节点，可通过递归遍历获取完整的界面元素层级。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::ui_tree`]。
     pub fn ui_tree(&self) -> Result<UiNode> {
         block_on(self.inner.ui_tree())?
     }
 
     /// 按组合条件查找窗口。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::find_window`]。
     pub fn find_window(&self, filter: &WindowFilter) -> Result<Option<UiWindow>> {
         Ok(block_on(self.inner.find_window(filter))??.map(|inner| UiWindow { inner }))
     }
 
     /// 获取当前活动窗口，找不到时回退到聚焦窗口。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::current_window`]。
     pub fn current_window(&self) -> Result<Option<UiWindow>> {
         Ok(block_on(self.inner.current_window())??.map(|inner| UiWindow { inner }))
     }
 
     /// 获取当前窗口大小。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::window_size`]。
     pub fn window_size(&self) -> Result<Option<(u32, u32)>> {
         block_on(self.inner.window_size())?
     }
 
-    /// 查找与选择器匹配的第一个控件元素。
+    /// 使用选择器查找指定索引的 UI 元素。
     ///
-    /// 返回 `None` 表示未找到匹配的元素。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::find`]。
     pub fn find(&self, selector: &Selector) -> Result<Option<Element>> {
         let element = block_on(self.inner.find(selector))??;
         Ok(element.map(|inner| Element { inner }))
     }
 
-    /// 查找与选择器匹配的所有控件元素。
+    /// 查找所有匹配选择器的 UI 元素。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::find_all`]。
     pub fn find_all(&self, selector: &Selector) -> Result<Vec<Element>> {
         Ok(block_on(self.inner.find_all(selector))??
             .into_iter()
@@ -839,33 +990,40 @@ impl HmDriver {
             .collect())
     }
 
-    /// 判断与选择器匹配的控件元素是否存在。
+    /// 判断选择器是否有匹配的元素。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::exists`]。
     pub fn exists(&self, selector: &Selector) -> Result<bool> {
         block_on(self.inner.exists(selector))?
     }
 
-    /// 统计与选择器匹配的控件元素数量。
+    /// 统计选择器匹配的元素数量。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::count`]。
     pub fn count(&self, selector: &Selector) -> Result<usize> {
         block_on(self.inner.count(selector))?
     }
 
-    /// 如果匹配选择器的控件存在则点击它。
+    /// 找到选择器指定索引的元素后点击，返回 `true`；未找到返回 `false`。
     ///
-    /// 返回 `true` 表示已点击，`false` 表示未找到匹配元素。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::click_if_exists`]。
     pub fn click_if_exists(&self, selector: &Selector) -> Result<bool> {
         block_on(self.inner.click_if_exists(selector))?
     }
 
-    /// 等待直到匹配选择器的控件出现，超时时间内返回该控件。
+    /// 在总超时时间内等待元素出现，超时返回 `Err(ElementNotFound)`。
     ///
-    /// 超时后仍没有匹配元素则返回 `Err`。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::wait_for`]。
     pub fn wait_for(&self, selector: &Selector, timeout: Duration) -> Result<Element> {
         block_on(self.inner.wait_for(selector, timeout))?.map(|inner| Element { inner })
     }
 
-    /// 等待直到条件函数返回 `true`，超时时间内返回结果。
+    /// 在同步上下文轮询任意条件，默认间隔 100 毫秒。
     ///
-    /// 条件函数会在循环中被反复调用，函数应返回 `Result<bool>`。
+    /// 条件返回 `true` 时成功，达到截止时间返回 `false`，条件错误直接返回。
+    /// 每次调用条件前检查截止时间，单次同步闭包执行至返回；耗时由闭包自行控制。
+    /// 闭包在普通调用线程运行，可以调用其他阻塞 API。Tokio 上下文中返回
+    /// [`crate::DriverError::BlockingInAsyncContext`]。
     pub fn wait_until<F>(&self, timeout: Duration, condition: F) -> Result<bool>
     where
         F: FnMut() -> Result<bool>,
@@ -873,13 +1031,10 @@ impl HmDriver {
         super::wait_until(timeout, Duration::from_millis(100), condition)
     }
 
-    /// 等待直到条件函数返回 `true`，可自定义轮询间隔。
+    /// 使用指定轮询间隔等待同步条件。
     ///
-    /// # 参数
-    ///
-    /// * `timeout` - 总超时时间
-    /// * `interval` - 轮询间隔
-    /// * `condition` - 条件判断函数
+    /// 语义同 [`wait_until`](Self::wait_until)，休眠以剩余截止时间为上限。
+    /// 截止时间在每次条件调用前检查，单次同步条件执行至返回。
     pub fn wait_until_with_interval<F>(
         &self,
         timeout: Duration,
@@ -892,29 +1047,31 @@ impl HmDriver {
         super::wait_until(timeout, interval, condition)
     }
 
-    /// 等待直到 XPath 表达式匹配的元素出现。
+    /// 等待 XPath 节点出现。
     ///
-    /// 超时后仍不出现则返回 `Err`。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::wait_for_xpath`]。
     pub fn wait_for_xpath(&self, expression: &str, timeout: Duration) -> Result<XPathElement> {
         block_on(self.inner.wait_for_xpath(expression, timeout))?
             .map(|inner| XPathElement { inner })
     }
 
-    /// 等待直到 XPath 表达式匹配的元素消失。
+    /// 等待 XPath 节点消失，超时返回 `false`。
     ///
-    /// 返回 `true` 表示元素已消失，`false` 表示超时后元素仍然存在。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::wait_until_xpath_gone`]。
     pub fn wait_until_xpath_gone(&self, expression: &str, timeout: Duration) -> Result<bool> {
         block_on(self.inner.wait_until_xpath_gone(expression, timeout))?
     }
 
-    /// 等待指定应用出现在前台（通过轮询判断）。
+    /// 等待指定应用进入前台，超时返回 `false`。
     ///
-    /// 返回 `true` 表示应用已在超时时间内出现。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::wait_for_app`]。
     pub fn wait_for_app(&self, bundle: &AppIdentifier, timeout: Duration) -> Result<bool> {
         block_on(self.inner.wait_for_app(bundle, timeout))?
     }
 
-    /// 等待文本内容匹配的节点出现，超时返回 `Err(ElementNotFound)`。
+    /// 等待文本内容匹配的节点出现（支持精确、包含、前后缀和正则表达式）。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::wait_for_text`]。
     pub fn wait_for_text(
         &self,
         text: &str,
@@ -924,7 +1081,9 @@ impl HmDriver {
         block_on(self.inner.wait_for_text(text, pattern, timeout))?
     }
 
-    /// 在超时时间内轮询 UI 树，直到某个节点满足 `predicate`。
+    /// 轮询 UI 树，返回深度优先遍历中第一个满足 `predicate` 的节点快照。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::wait_for_ui`]。
     pub fn wait_for_ui(
         &self,
         timeout: Duration,
@@ -934,6 +1093,8 @@ impl HmDriver {
     }
 
     /// 使用指定的轮询间隔等待 UI 节点出现。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::wait_for_ui_with_interval`]。
     pub fn wait_for_ui_with_interval(
         &self,
         timeout: Duration,
@@ -946,7 +1107,9 @@ impl HmDriver {
         )?
     }
 
-    /// 在超时时间内等待页面级条件满足，并返回完整 UI 树。
+    /// 轮询完整 UI 树，直到 `predicate` 对根节点返回 `true`。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::wait_for_ui_tree`]。
     pub fn wait_for_ui_tree(
         &self,
         timeout: Duration,
@@ -955,7 +1118,9 @@ impl HmDriver {
         block_on(self.inner.wait_for_ui_tree(timeout, predicate))?
     }
 
-    /// 使用指定轮询间隔等待页面级条件满足，并返回完整 UI 树。
+    /// 使用指定轮询间隔等待满足页面级条件的完整 UI 树。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::wait_for_ui_tree_with_interval`]。
     pub fn wait_for_ui_tree_with_interval(
         &self,
         timeout: Duration,
@@ -968,17 +1133,23 @@ impl HmDriver {
         )?
     }
 
-    /// 通过 XPath 表达式查找元素，找不到时返回 `Err`。
+    /// 通过 XPath 表达式查找第一个匹配的 UI 元素，未找到返回 `Err(XPathNotFound)`。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::xpath`]。
     pub fn xpath(&self, expression: &str) -> Result<XPathElement> {
         block_on(self.inner.xpath(expression))?.map(|inner| XPathElement { inner })
     }
 
-    /// 通过 XPath 表达式查找元素，找不到时返回 `None`。
+    /// 通过 XPath 表达式查找第一个匹配的 UI 元素，未找到返回 `None`。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::xpath_optional`]。
     pub fn xpath_optional(&self, expression: &str) -> Result<Option<XPathElement>> {
         Ok(block_on(self.inner.xpath_optional(expression))??.map(|inner| XPathElement { inner }))
     }
 
-    /// 通过 XPath 表达式查找所有匹配的元素。
+    /// 通过 XPath 表达式查找所有匹配的 UI 元素。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::xpath_all`]。
     pub fn xpath_all(&self, expression: &str) -> Result<Vec<XPathElement>> {
         Ok(block_on(self.inner.xpath_all(expression))??
             .into_iter()
@@ -986,14 +1157,16 @@ impl HmDriver {
             .collect())
     }
 
-    /// 判断 XPath 表达式是否有任何匹配的元素。
+    /// 判断 XPath 表达式是否有匹配的元素。
+    ///
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::xpath_exists`]。
     pub fn xpath_exists(&self, expression: &str) -> Result<bool> {
         block_on(self.inner.xpath_exists(expression))?
     }
 
-    /// 如果 XPath 表达式匹配的元素存在则点击它。
+    /// 如果 XPath 匹配的元素存在则点击，返回是否点击成功。
     ///
-    /// 返回 `true` 表示已点击，`false` 表示未找到匹配元素。
+    /// 参数、返回值和设备要求见 [`crate::HmDriver::xpath_click_if_exists`]。
     pub fn xpath_click_if_exists(&self, expression: &str) -> Result<bool> {
         block_on(self.inner.xpath_click_if_exists(expression))?
     }

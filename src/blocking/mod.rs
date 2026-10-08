@@ -1,21 +1,35 @@
 //! 同步阻塞门面（Blocking Facade）。
 //!
-//! 本模块提供 `HmDriver`、`Element`、`XPathElement` 的同步阻塞 API，
-//! 将底层异步操作封装为同步调用。所有方法都复用进程级 Tokio runtime，
+//! 本模块提供 `HmDriver`、`Element`、`XPathElement`、`UiWindow` 的同步阻塞 API，
+//! 将底层异步操作封装为同步调用。执行异步操作的方法复用进程级 Tokio runtime，
 //! 避免重复创建 runtime 的开销。
 //!
 //! # 设计目标
 //!
 //! - 为需要同步编程模型的调用方（如 CLI 工具、脚本、不支持异步的框架）
 //!   提供与异步 API 等价的功能。
-//! - 通过全局 `OnceLock<Runtime>` 实现 runtime 的单例化，进程内只创建一个
-//!   Tokio runtime 实例。
+//! - 通过全局 `OnceLock<Runtime>` 保留并复用进程级共享 Tokio runtime。
 //!
-//! # 注意事项
+//! # 示例
 //!
-//! - 若在 Tokio 异步上下文中调用本模块的方法，会返回
-//!   [`crate::DriverError::BlockingInAsyncContext`] 错误，避免阻塞
-//!   异步执行器导致死锁。
+//! ```no_run
+//! use hm_driver_rs::{blocking::HmDriver, Result, Selector};
+//! # fn main() -> Result<()> {
+//! let driver = HmDriver::builder().connect()?;
+//! let operation = driver.click_if_exists(&Selector::new().text("确定"));
+//! let cleanup = driver.close();
+//! operation?;
+//! cleanup
+//! # }
+//! ```
+//!
+//! # 调用上下文
+//!
+//! - 同步调用 RPC/HDC 或执行同步条件等待时，检测当前 Tokio 上下文；有 runtime
+//!   上下文则返回 [`crate::DriverError::BlockingInAsyncContext`]。
+//! - Builder 设置和读取 XPath 属性等纯主机操作直接返回，不进入 runtime。
+//! - 同步条件闭包在当前普通线程执行，闭包内部可以调用其他阻塞方法。
+//!   截止时间在条件调用前检查，单次闭包的耗时由调用方控制。
 
 // ---------------------------------------------------------------------------
 // 私有子模块
@@ -39,7 +53,7 @@ pub use driver::{HmDriver, HmDriverBuilder};
 pub use element::Element;
 /// 窗口对象的同步操作封装。
 pub use window::UiWindow;
-/// 通过 XPath 定位到的元素集合，提供批量操作方法。
+/// 单个 XPath 查询结果快照的同步操作封装。
 pub use xpath::XPathElement;
 
 use crate::Result;
@@ -78,8 +92,7 @@ pub static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 ///
 /// # Panics
 ///
-/// 在 `RUNTIME.set()` 成功但后续 `RUNTIME.get()` 返回 `None` 时 panic。
-/// 这在当前实现逻辑下不应发生，属于防御性检查。
+/// 通过 `expect` 读取已完成初始化的全局 runtime。
 fn block_on<F: Future>(future: F) -> Result<F::Output> {
     reject_async_context()?;
 

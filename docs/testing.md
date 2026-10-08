@@ -14,6 +14,34 @@ cargo test --all-features
 cargo check --no-default-features
 ```
 
+## 文档检查
+
+公开项启用 `missing_docs` 警告。Rustdoc 检查缺失说明和内部链接，文档测试验证示例；
+连接设备的示例使用 `no_run` 做编译验证，Selector、UI 快照、Gesture 和 Agent 解析
+示例直接执行。
+
+PowerShell：
+
+```powershell
+$env:RUSTDOCFLAGS = "-D warnings"
+cargo doc --all-features --no-deps
+cargo doc --no-default-features --no-deps
+cargo doc --all-features --no-deps --document-private-items
+Remove-Item Env:\RUSTDOCFLAGS
+cargo test --doc --all-features
+cargo test --doc --no-default-features
+cargo clippy --all-targets --all-features -- -D warnings
+cargo fmt --all -- --check
+```
+
+最低 Rust 版本为 `1.88`，使用 `cargo +1.88.0 test --all-features` 验证；仅异步和外部
+Agent 接入可用 `cargo +1.88.0 test --no-default-features` 验证。
+
+每个 Rust 文件以 `//!` 记录模块职责、关键行为和关联 API，公开项以 `///` 说明；
+`--document-private-items` 用于查阅内部拆分模块及其链接。
+
+## 模拟与真机测试
+
 系统辅助能力的单元测试以模拟 HDC 验证命令参数、shell 引号、工具缺失、异常回显、
 低 API Level、自定义网络场景启动失败后的清理，以及字体临时文件清理；不修改真机。
 可单独执行 `cargo test --all-features driver::system::tests`。
