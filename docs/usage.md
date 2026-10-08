@@ -54,9 +54,12 @@ serde_json = "1"
 
 默认启用两个 feature：
 
-- `blocking`：启用 `hm_driver_rs::blocking` 阻塞门面；
+- `blocking`：启用 `hm_driver_rs::blocking` 阻塞门面及其多线程 Tokio runtime；
 - `embedded-agents`：将仓库内的五个官方 Agent 编译进 crate，并在首次使用时写入
   私有缓存目录。
+
+异步应用按需配置 Tokio 的 runtime 和宏 features；上面的依赖示例已启用
+`macros` 与 `rt-multi-thread`。库的异步核心使用 `rt`，测试通过开发依赖启用宏。
 
 如果只使用异步 API，可以关闭阻塞门面；如果同时关闭 `embedded-agents`，连接时必须
 通过 `AgentSource::Directory` 提供外部 Agent 文件：
