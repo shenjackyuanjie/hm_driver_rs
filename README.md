@@ -8,7 +8,7 @@
 - 多指、指关节、鼠标、触控笔、触控板和表冠输入；
 - 剪贴板、深浅色模式、时间/时区、字体和网络模拟。
 
-当前 crate 版本：`1.0.1`。Hypium 对齐版本：`26.0.0.500`，可通过
+当前 crate 版本：`1.1.0`。Hypium 对齐版本：`26.0.0.500`，可通过
 `hm_driver_rs::HYPIUM_ALIGNMENT_VERSION` 读取。
 已有功能和待补功能见 [Hypium 对齐记录](docs/hypium-alignment.md)。
 
@@ -24,7 +24,7 @@ hdc list targets -v
 
 ```toml
 [dependencies]
-hm_driver_rs = "1.0.1"
+hm_driver_rs = "1.1.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 

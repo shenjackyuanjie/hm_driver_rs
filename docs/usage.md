@@ -38,7 +38,7 @@ hdc list targets -v
 
 ```toml
 [dependencies]
-hm_driver_rs = "1.0.1"
+hm_driver_rs = "1.1.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 serde_json = "1"
 ```
