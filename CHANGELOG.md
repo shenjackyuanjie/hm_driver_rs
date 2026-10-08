@@ -4,7 +4,7 @@
 开发期间将每次变更补入当前未发布版本，按新增、变更、修复、依赖和文档分类。
 发布时将「未发布」替换为实际发布日期（`YYYY-MM-DD`），并固定对应 Git tag。
 
-## 1.1.0（未发布）
+## 1.1.0（2026-10-08）
 
 ### 新增
 
@@ -52,7 +52,7 @@
 - 新增模拟 HDC 系统辅助测试，以及覆盖错误格式、source 链和 `?` 转换的回归测试。
 - 建立本更新日志，并在 README 添加入口。
 
-[查看相对 1.0.1 的变更](https://github.com/shenjackyuanjie/hm_driver_rs/compare/v1.0.1...HEAD)
+[查看相对 1.0.1 的变更](https://github.com/shenjackyuanjie/hm_driver_rs/compare/v1.0.1...v1.1.0)
 
 ## 1.0.1
 
